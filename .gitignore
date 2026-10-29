@@ -1,0 +1,12 @@
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+.env
+.DS_Store
+
+# Runtime data of eet2-server: certificate, private key, renewal state (ADR-007)
+.storage/
+
+# Official playground test certificates, downloaded by a script (ADR-011)
+.fixtures/
