@@ -43,11 +43,16 @@ Spouštět z kořene repozitáře:
 | Skript | Popis |
 |---|---|
 | `npm install` | instalace všech workspaces |
+| `npm run dev` | eet2-server ve watch režimu nad zdrojáky (bez buildu); úložiště `.storage/` v kořeni repa |
+| `npm start` | eet2-server ze sestaveného `dist/` |
 | `npm run build` | build všech workspaces |
 | `npm run typecheck` | typová kontrola |
 | `npm test` | unit testy (offline) |
 | `npm run test:playground` | stáhne oficiální testovací certifikáty do `.fixtures/playground/` a spustí integrační testy proti playground EET (síť; čtvrtek 20:00–6:00 bývá servisní okno) |
 | `npx changeset` | záznam změny pro příští release (Changesets zatím nejsou nastavené) |
+| `docker build -t eet2-server:local .` | lokální Docker image serveru |
+
+Lokální vyzkoušení serveru proti playground je popsané v [README.md](README.md).
 
 ## Pravidla
 

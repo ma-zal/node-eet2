@@ -163,7 +163,8 @@ export class CertificateManager {
     this.maxPollingMs = options.maxPollingMs ?? 600_000;
     this.pendingRecheckMs = options.pendingRecheckMs ?? 900_000;
     this.now = options.now ?? (() => new Date());
-    this.sleep = options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
+    // Timer nesmí bránit ukončení procesu; rozběhnutá žádost je uložená a po restartu se na ni naváže.
+    this.sleep = options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms).unref()));
     this.detectEnvironment = options.detectEnvironment ?? detectCertificateEnvironment;
     this.log = options.log ?? (() => undefined);
   }

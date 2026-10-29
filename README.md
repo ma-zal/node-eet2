@@ -13,17 +13,35 @@ Open-source klient pro **EET 2.0** (elektronická evidence tržeb v ČR, ostrý 
 
 eet2 tržbu podepíše, odešle a vrátí výsledek. **Frontu tržeb, opakování odeslání a hlídání 48hodinové lhůty řeší pokladní systém**, protože tržba musí vzniknout atomicky spolu s účtenkou (viz ADR-001).
 
-## Plánované použití eet2-server
+## eet2-server
+
+### Nasazení
 
 ```yaml
 services:
   eet2-server:
-    image: ghcr.io/ma-zal/eet2-server:1
+    image: ghcr.io/ma-zal/eet2-server:1   # zatím nevydáno – lokálně: docker build -t eet2-server:local .
     restart: unless-stopped
     volumes:
-      - ./storage-eet2:/app/.storage   # certifikát, stav obnovy, konfigurace
+      - ./storage-eet2:/app/.storage   # konfigurace, certifikát s privátním klíčem, stav obnovy
+    # environment:
+    #   EET2_KEY_PASSPHRASE: "…"       # doporučeno: šifrování privátního klíče v úložišti
     # bez publikovaného portu – volá ho jen pokladní systém ve stejné síti (ADR-009)
 ```
+
+1. Adresář `./storage-eet2` musí existovat. Při prvním startu se v něm založí `config.cjs` a služba skončí chybou, dokud v něm nenastavíte `environment` (`'playground'` nebo `'production'`).
+2. Nahrajte pokladní certifikát z DIS+: `PUT /api/v1/certificate` s `{ "pkcs12": "<.p12 v base64>", "password": "…" }`.
+3. Odesílejte tržby: `POST /api/v1/sales`.
+
+### API
+
+| Endpoint | Účel |
+|---|---|
+| `POST /api/v1/sales` | podepíše a odešle jednu tržbu |
+| `GET /api/v1/status` | prostředí, certifikát, stav obnovy, poslední úspěch a chyba |
+| `PUT /api/v1/certificate` | nahrání `.p12` a hesla |
+| `POST /api/v1/certificate/renew` | ruční spuštění obnovy certifikátu |
+| `GET /healthy` | healthcheck (chyba jen při prošlém certifikátu) |
 
 ```http
 POST /api/v1/sales
@@ -42,6 +60,39 @@ Content-Type: application/json
 ```
 
 Odpověď obsahuje `result` (`accepted` / `rejected` / `retry` / `verified`) a při úspěchu potvrzovací kód `pok`. Úplný popis je v ADR-005 a ADR-006.
+
+### Lokální vyzkoušení proti playground
+
+```bash
+npm install
+npm run test:playground     # mimo jiné stáhne oficiální testovací certifikáty do .fixtures/playground/
+
+mkdir -p .storage
+npm run build && npm start  # první start založí .storage/config.cjs a skončí chybou
+# v .storage/config.cjs nastavit environment: 'playground'
+npm start                   # nebo `npm run dev` (watch režim nad zdrojáky, bez buildu)
+
+# nahrání testovacího certifikátu
+P12=$(base64 -i .fixtures/playground/CA_EET-Playground-CZ683555118.p12 | tr -d '\n')
+PASS=$(tr -d '\r\n' < .fixtures/playground/password_pokladni_cert_playground.txt)
+curl -X PUT localhost:3000/api/v1/certificate -H 'Content-Type: application/json' \
+  -d "{\"pkcs12\":\"$P12\",\"password\":\"$PASS\"}"
+
+# odeslání tržby
+curl -X POST localhost:3000/api/v1/sales -H 'Content-Type: application/json' \
+  -d "{\"prvni_zaslani\":true,\"data\":{\"id_jednotky\":21,\"id_pokl\":\"TEST1\",\"porad_cis\":\"T$(date +%s)\",\"dat_trzby\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"celk_trzba\":\"350.00\"}}"
+
+curl localhost:3000/api/v1/status
+```
+
+V Dockeru stejně, jen s připojeným úložištěm:
+
+```bash
+docker build -t eet2-server:local .
+docker run --rm -p 3000:3000 -v "$PWD/.storage:/app/.storage" eet2-server:local
+```
+
+Playground mívá servisní okno zpravidla ve čtvrtek 20:00–6:00. Potvrzovací kód z playground končí `-ff` a není platný.
 
 ## Jazyk
 

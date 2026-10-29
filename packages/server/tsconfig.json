@@ -1,0 +1,11 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    // Typová kontrola, testy a dev režim pracují přímo se zdrojáky core, bez nutnosti ho buildit.
+    "paths": {
+      "eet2-core": ["../core/src/index.ts"]
+    }
+  },
+  "include": ["src", "test", "vitest.config.ts"]
+}

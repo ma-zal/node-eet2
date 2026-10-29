@@ -1,0 +1,13 @@
+**/node_modules
+**/dist
+**/coverage
+**/*.tsbuildinfo
+.git
+.github
+.changeset
+.storage
+.fixtures
+docs
+scripts
+**/.env
+**/.DS_Store

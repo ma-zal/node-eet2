@@ -65,7 +65,13 @@ node-eet2/
 │   │       ├── playground/   # integrační testy proti playground (npm run test:playground)
 │   │       └── fixtures/     # skutečné odpovědi playground, veřejný testovací certifikát
 │   └── server/               # eet2-server, private, publikuje se jen jako Docker image
-│       ├── src/              # app.ts, server.ts, routes/, services/, schemas/
+│       ├── src/
+│       │   ├── server.ts     # vstupní bod: konfigurace, úložiště, CertificateManager, HTTP server
+│       │   ├── app.ts        # Fastify aplikace (v testech přes inject)
+│       │   ├── routes/       # sales, status, certificate, healthy
+│       │   ├── config.ts     # načtení a validace .storage/config.cjs
+│       │   ├── file-certificate-store.ts
+│       │   └── schemas.ts, logger.ts, versions.ts
 │       └── test/
 ├── docs/architecture-decisions.md
 ├── scripts/                  # download-playground-fixtures.mjs
@@ -77,6 +83,7 @@ node-eet2/
 ```
 
 - Server závisí na core přes workspace. V jednom commitu jsou tak vždy kompatibilní a Docker build nepotřebuje publikovaný core.
+- Typová kontrola, testy a dev režim serveru (`npm run dev`) pracují přímo se zdrojáky core (`paths` v `tsconfig.json`, alias ve `vitest.config.ts`), takže core není nutné předem buildit. Build serveru a Docker image používají sestavený core.
 - Core je ESM-only.
 - Technické přílohy pro vývojáře (XSD, WSDL, `caeetapi_jwt.yml`) a veřejné certifikáty CA EET jsou součástí core.
 - PDF dokumenty z eet.gov.cz v repozitáři nejsou. Část je označená TLP:AMBER, odkazujeme na oficiální zdroj.
@@ -197,9 +204,27 @@ Pokud eet2 požadavek zpracuje, vrací vždy HTTP 200 s polem `result`:
 ```
 
 - Pole bez hodnoty se ve výsledku vynechávají (např. `error.kod` mimo `type: eet`, `signature_error` při platném podpisu).
-- Při neplatných vstupních datech se nic neodesílá: `result: rejected`, `error.type: validation`, bez `uuid_zpravy`.
-- `503` s tělem `{ "error": { "type": "no_certificate", "message": "…" } }`: eet2 nemá platný certifikát.
+- Při neplatných vstupních datech se nic neodesílá: HTTP 200, `result: rejected`, `error.type: validation`, bez `uuid_zpravy`. Platí i pro chybějící nebo neznámé položky požadavku, aby je volající neopakoval.
+- `503` s tělem `{ "error": { "type": "no_certificate", "message": "…" } }`: eet2 nemá platný certifikát (žádný, prošlý nebo ještě neplatný).
 - Pravidlo pro volajícího: HTTP 200 → řídit se podle `result`. Cokoli jiného (spojení odmítnuto, timeout volání, 5xx včetně 503) → stejně jako `retry`.
+
+### Chyby ostatních endpointů
+
+Tělo `{ "error": { "type": "…", "message": "…" } }`, zpráva je česky:
+
+| HTTP | `type` | Kdy |
+|---|---|---|
+| 400 | `validation` | neplatný požadavek (chybějící nebo neznámé položky) |
+| 400 | `invalid_certificate` | `.p12` nelze načíst, chybné heslo, certifikát z jiného prostředí nebo neplatný |
+| 409 | `renewal_unavailable` | ruční obnova bez CA EET API nebo po vypršení certifikátu |
+| 409 | `no_certificate` | ruční obnova bez nahraného certifikátu |
+| 404 | `not_found` | neznámý endpoint |
+| 500 | `internal` | neočekávaná chyba (podrobnosti jen v logu) |
+
+### `PUT /api/v1/certificate` a `POST /api/v1/certificate/renew`
+
+- Nahrání vrací HTTP 200 se stavem certifikátu (`certificate` a `renewal` jako v `GET /api/v1/status`).
+- Ruční obnova vrací HTTP 202 a běží na pozadí, protože čekání na CA může trvat minuty. Průběh je vidět v `GET /api/v1/status`.
 
 ### `GET /api/v1/status`
 
@@ -207,6 +232,7 @@ Pokud eet2 požadavek zpracuje, vrací vždy HTTP 200 s polem `result`:
 {
   "environment": "playground",          // playground | production
   "server_version": "1.0.0", "core_version": "1.0.0", "git_sha": "…",
+  "key_encrypted": false,               // ukládá se privátní klíč šifrovaně (EET2_KEY_PASSPHRASE)
   "certificate": {                      // chybí, pokud není nahrán
     "eic": "CZ00000019", "serial_number": "…",
     "valid_from": "…", "valid_to": "…", "days_left": 214,
@@ -219,10 +245,12 @@ Pokud eet2 požadavek zpracuje, vrací vždy HTTP 200 s polem `result`:
     "req_id": "…", "ca_state": "INPROCESS",
     "last_error": { "at": "…", "message": "…" }
   },
-  "last_success_at": "…",
-  "last_error": { "at": "…", "message": "…" }
+  "last_success_at": "…",               // poslední accepted / verified
+  "last_error": { "at": "…", "message": "…" }   // poslední rejected / retry
 }
 ```
+
+`last_success_at` a `last_error` jsou jen v paměti a po restartu chybí. Historii pokusů drží volající (ADR-001).
 
 ## ADR-006: Klasifikace výsledku odeslání
 
@@ -276,14 +304,29 @@ Pokud eet2 požadavek zpracuje, vrací vždy HTTP 200 s polem `result`:
 
 ```js
 module.exports = {
-  environment: 'playground',   // 'playground' | 'production' – určuje endpoint EET, CA API a očekávanou CA
+  environment: 'playground',   // povinné: 'playground' | 'production' – určuje endpoint EET, CA API a očekávanou CA
   requestTimeoutMs: 5000,      // mezní doba odezvy, minimum 2000
   renewBeforeDays: 21,         // kdy začít obnovu před koncem platnosti
+  // eetUrl: '…',              // přepis adresy EET (vývoj)
+  // caApiUrl: '…' | null,     // přepis adresy CA EET API; null = automatickou obnovu vypnout
 };
 ```
 
-- Načítání a validace jako teya ADR-002: chybějící `.storage/` znamená fail-fast (nepřipojený volume). Chybějící `config.cjs` se založí z šablony.
-- URL endpointu EET a CA API jsou odvozené z `environment` a lze je přepsat (`eetUrl`, `caApiUrl`) pro vývoj.
+- Načítání a validace jako teya ADR-002: chybějící `.storage/` znamená fail-fast (nepřipojený volume). Chybějící `config.cjs` se založí ze šablony s prázdným `environment`, která neprojde validací. Prostředí se tak musí zvolit vědomě – omylem nasazený playground by vypadal funkčně, ale tržby by se neevidovaly.
+- Neznámé položky konfigurace jsou chyba (překlep se neztratí).
+- Výchozí CA EET API: produkce `https://ca.caeet.gov.cz/api`, playground žádné.
+
+### Proměnné prostředí
+
+Jen pro věci svázané s procesem a kontejnerem:
+
+| Proměnná | Výchozí | Popis |
+|---|---|---|
+| `PORT` | `3000` | port HTTP serveru |
+| `HOST` | `0.0.0.0` | adresa HTTP serveru |
+| `EET2_STORAGE_DIR` | `.storage` (vůči pracovnímu adresáři) | adresář úložiště; v Docker image `/app/.storage` |
+| `EET2_KEY_PASSPHRASE` | – | šifrování privátního klíče v úložišti |
+| `GIT_SHA` | – | commit, nastavuje Docker build (`--build-arg GIT_SHA`) |
 
 ## ADR-008: Automatická obnova certifikátu
 
@@ -308,7 +351,8 @@ module.exports = {
   - 401 → certifikát CA neuznává, nový pokus po 24 h; pokud mezitím vypršel, stav `expired`,
   - 404 u rozběhnuté žádosti → žádost v CA neexistuje (např. propadla lhůta 30 dní), příště se podá nová.
 - Po vypršení certifikátu automatická obnova není možná (CA vyžaduje platný certifikát). Stav `expired` vyžaduje ruční vydání v DIS+ a nahrání (ADR-007).
-- `POST /api/v1/certificate/renew` spustí obnovu hned, pokud žádná neběží.
+- `POST /api/v1/certificate/renew` spustí obnovu hned (i před termínem a přes prodlevu po chybě), na pozadí.
+- Čekání na CA neblokuje ukončení procesu; rozběhnutá žádost je uložená a po restartu se na ni naváže.
 - CA API URL (`CA_EET_API_URLS` v core):
   - produkce `https://ca.caeet.gov.cz/api`,
   - testovací `https://ca.test.caeet.gov.cz/api` a zkušební `https://ca.zkus.caeet.gov.cz/api`,
