@@ -2,7 +2,7 @@
 
 Knihovna pro **EET 2.0** (elektronická evidence tržeb v ČR): sestavení, podpis a odeslání datové zprávy o tržbě, klasifikace výsledku a načtení pokladního certifikátu.
 
-> **Stav: ve vývoji (0.x).** Automatická obnova certifikátu přes CA EET zatím chybí.
+> **Stav: ve vývoji (0.x).** Automatická obnova certifikátu přes CA EET je implementovaná, ale zatím neověřená proti skutečné CA EET.
 
 ## Použití
 
@@ -40,6 +40,26 @@ switch (result.result) {
 ```
 
 Názvy položek dat (`id_jednotky`, `porad_cis`, `celk_trzba`, …) jsou převzaté doslova z rozhraní EET. Částky se zadávají jako řetězec s právě dvěma desetinnými místy.
+
+## Správa certifikátu a automatická obnova
+
+```ts
+import { CA_EET_API_URLS, CaEetClient, CertificateManager } from 'eet2-core';
+
+const manager = new CertificateManager({
+  store: myStore, // vlastní CertificateStore (load/save) – stav obsahuje privátní klíč, chraňte ho
+  environment: 'production',
+  ca: new CaEetClient({ baseUrl: CA_EET_API_URLS.production }),
+});
+await manager.load();
+await manager.installPkcs12(p12, password); // první certifikát ručně z DIS+
+manager.start(); // každou hodinu zkontroluje, zda je na řadě obnova (výchozí 21 dní před koncem platnosti)
+
+const credentials = manager.getCredentials(); // aktuální certifikát pro sendSale()
+const status = manager.getStatus(); // platnost a stav obnovy, bez citlivých údajů
+```
+
+Obnova probíhá přes CA EET API (`renew` → `status` → `claim-download` → `ack-download`) s JWT podepsaným obnovovaným certifikátem. Rozběhnutá žádost je uložená ve stavu, takže po restartu se pokračuje. Po vypršení certifikátu automatická obnova možná není a certifikát je nutné vydat ručně v DIS+.
 
 ## Co knihovna nedělá
 

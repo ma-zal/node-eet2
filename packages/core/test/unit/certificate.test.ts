@@ -6,7 +6,7 @@ import { EetCertificateError } from '../../src/errors.js';
 import { createTestIdentity, readFixture, toLegacyPkcs12 } from './helpers.js';
 
 describe('loadPkcs12', () => {
-  const identity = createTestIdentity({ commonName: 'CZ683555118' });
+  const identity = createTestIdentity({ commonName: 'CZ683555118', serialNumber: '0a1b2c3d' });
 
   it('načte legacy .p12 (3DES) a vrátí metadata', () => {
     const credentials = loadPkcs12(toLegacyPkcs12(identity, 'ABcd1234'), 'ABcd1234');

@@ -1,4 +1,4 @@
-import { generateKeyPairSync } from 'node:crypto';
+import { generateKeyPairSync, randomBytes } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import forge from 'node-forge';
 import { credentialsFromPem, type EetCredentials } from '../../src/certificate/credentials.js';
@@ -12,14 +12,17 @@ export interface TestIdentity {
 }
 
 /** Vygeneruje RSA klíč (přes node:crypto kvůli rychlosti) a self-signed certifikát s CN = EIČ. */
-export function createTestIdentity(options: { commonName?: string; validFrom?: Date; validTo?: Date } = {}): TestIdentity {
+export function createTestIdentity(
+  options: { commonName?: string; validFrom?: Date; validTo?: Date; serialNumber?: string } = {},
+): TestIdentity {
   const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
   const keyPem = privateKey.export({ type: 'pkcs8', format: 'pem' }).toString();
   const forgeKey = forge.pki.privateKeyFromPem(keyPem) as forge.pki.rsa.PrivateKey;
 
   const cert = forge.pki.createCertificate();
   cert.publicKey = forge.pki.setRsaPublicKey(forgeKey.n, forgeKey.e);
-  cert.serialNumber = '0a1b2c3d';
+  // Kladné sériové číslo, u každé identity jiné (podle něj se pozná nový certifikát).
+  cert.serialNumber = options.serialNumber ?? `1${randomBytes(7).toString('hex')}`;
   cert.validity.notBefore = options.validFrom ?? new Date('2026-01-01T00:00:00Z');
   cert.validity.notAfter = options.validTo ?? new Date('2027-01-02T00:00:00Z');
   const attrs = [

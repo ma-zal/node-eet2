@@ -129,6 +129,7 @@ Core je knihovna na npm, server je Docker image, který core obsahuje. Změna v 
 | Response | `uuid_zpravy`, `dat_odesl`, `dat_prij`, `dat_odmit`, `pok`, `test`, `kod` (z `<Chyba>`), `kod_varov` (z `<Varovani>`) | `result`, `warnings[{ kod_varov, message }]`, `error{ type, kod, message }`, `signature_valid`, `global_transaction_id` (z hlavičky `X-Global-Transaction-Id`), `duration_ms` |
 | `GET /api/v1/status` | `eic`; stav žádosti CA doslova (`INPROCESS`, `ISSUED`, `DELIVERING`, `FINISHED`, `REJECTED`) v `ca_state`; `req_id` (= `reqId` z CA API, jen `snake_case`) | `environment`, `certificate{ … }`, `renewal{ … }`, `last_success_at`, `last_error`, verze |
 | `PUT /api/v1/certificate` | `pkcs12`, `password` (shodné s CA API `Pkcs12DTO`) | – |
+| Core – typy CA EET API | názvy z `caeetapi_jwt.yml` doslova včetně `camelCase`: `reqId`, `state`, `pollAfterSeconds`, `rejectedReason`, `sn`, `validFrom`, `validTo` | `CaEetClient`, `CaEetApi`, `CaRequestStatus`, `CaPkcs12` |
 
 ## ADR-005: HTTP API eet2-server v1
 
@@ -206,12 +207,14 @@ Pokud eet2 požadavek zpracuje, vrací vždy HTTP 200 s polem `result`:
 {
   "environment": "playground",          // playground | production
   "server_version": "1.0.0", "core_version": "1.0.0", "git_sha": "…",
-  "certificate": {                      // null, pokud není nahrán
+  "certificate": {                      // chybí, pokud není nahrán
     "eic": "CZ00000019", "serial_number": "…",
-    "valid_from": "…", "valid_to": "…", "days_left": 214
+    "valid_from": "…", "valid_to": "…", "days_left": 214,
+    "installed_at": "…", "source": "upload"      // upload | renewal
   },
   "renewal": {
-    "state": "scheduled",               // idle | scheduled | in_progress | failed | expired
+    "state": "scheduled",               // idle | scheduled | in_progress | failed | expired (ADR-008)
+    "automatic": true,                  // je nakonfigurované CA EET API
     "scheduled_at": "…", "next_attempt_at": "…",
     "req_id": "…", "ca_state": "INPROCESS",
     "last_error": { "at": "…", "message": "…" }
@@ -260,9 +263,11 @@ Pokud eet2 požadavek zpracuje, vrací vždy HTTP 200 s polem `result`:
   3. Při chybě se nic nemění a vrátí se `400` s českou zprávou.
   4. Při úspěchu se nový certifikát stane aktuálním. Dosavadní se přesune do `previous` jen pro historii, k podpisu se nepoužívá.
 - Heslo k `.p12` se neukládá. Po načtení se klíč a certifikát uloží v PEM.
-- Soubor `.storage/certificate.json`:
-  - `version`, `environment`,
-  - `current` a `previous`, každý s poli `cert_pem`, `key_pem`, `chain_pem[]`, `eic`, `serial_number`, `valid_from`, `valid_to`, `installed_at`, `source` (`upload` / `renewal`).
+- Správu certifikátu včetně obnovy dělá `CertificateManager` z core. Stav ukládá jako jeden dokument `CertificateState` přes rozhraní `CertificateStore`; server ho ukládá do souboru `.storage/certificate.json`, embedder si může dodat vlastní úložiště. Obsah:
+  - `version`,
+  - `current` a `previous`, každý s poli `cert_pem`, `key_pem`, `chain_pem[]`, `eic`, `serial_number`, `valid_from`, `valid_to`, `installed_at`, `source` (`upload` / `renewal`),
+  - `renewal` – rozběhnutá žádost o obnovu (ADR-008),
+  - `last_renewal_error`, `next_renewal_attempt_at`.
 - Zápis atomicky (dočasný soubor + rename), oprávnění `0600`, souběžné zápisy chrání in-process mutex.
 - Volitelné šifrování privátního klíče: pokud je nastavená proměnná prostředí `EET2_KEY_PASSPHRASE`, ukládá se klíč jako šifrovaný PKCS#8. Bez ní se uloží nešifrovaně a status na to upozorní. CA EET doporučuje klíč nešifrovaný neuchovávat.
 - Klíč, heslo ani obsah `.p12` se nikdy nevrací přes API ani nelogují.
@@ -284,26 +289,36 @@ module.exports = {
 
 ### Rozhodnutí
 
-- Plánovač uvnitř eet2-serveru spustí obnovu v `valid_to − renewBeforeDays`. Pokud je tento okamžik po startu už v minulosti, spustí ji ihned.
+- Obnovu řídí `CertificateManager` (core). Server ho spustí s periodickou kontrolou každou hodinu; obnova začne při první kontrole po `valid_to − renewBeforeDays` (výchozí 21 dní). Pokud je termín po startu už v minulosti, začne hned.
 - Autentizace k CA EET API: pro každé volání nový JWT.
   - Header: `alg: RS256`, `typ: JWT`, `x5t#S256` = base64url(SHA-256(DER certifikátu)).
-  - Payload: `iat` a `exp` (nejvýše 5 minut po `iat`).
+  - Payload: `iat` (o 30 s do minulosti kvůli případně předbíhajícím hodinám) a `exp` = `iat` + 240 s (CA vyžaduje nejvýše 5 minut).
   - Podpis privátním klíčem obnovovaného certifikátu, implementace přes `node:crypto` bez další knihovny.
-- Průběh, stav v `.storage/renewal.json` (`req_id`, `ca_state`, `started_at`, sériové číslo obnovovaného certifikátu):
+  - Všechna volání jedné žádosti (včetně `ack-download` po instalaci nového certifikátu) se autentizují obnovovaným certifikátem.
+- Průběh, rozběhnutá žádost je v `CertificateState.renewal` (`req_id`, `ca_state`, `started_at`, `renewing_serial_number`):
   1. `GET /request/not-finished`: pokud existuje rozběhnutá žádost (např. po pádu), navázat na ni místo nové.
   2. `POST /request/renew`: `req_id` se uloží **před** pollingem.
-  3. `GET /request/{reqId}/status` podle `pollAfterSeconds` / `Retry-After`, dokud je stav `INPROCESS`.
-  4. Stav `ISSUED` nebo `DELIVERING`: `POST /request/{reqId}/claim-download`, validace jako při nahrání (ADR-007), uložení jako aktuální certifikát.
-  5. Teprve po úspěšném uložení `POST /request/{reqId}/ack-download` a smazání `renewal.json`. Do potvrzení jde certifikát stáhnout znovu (nejvýše 30 dní od vydání).
-- Chyby:
-  - síť, 5xx, 429 → opakovat po 1 h (u 429 podle odpovědi),
-  - `REJECTED` → stav `failed` s důvodem, nový pokus po 24 h,
-  - 401 → certifikát CA neuznává; pokud mezitím vypršel, stav `expired`.
+  3. `GET /request/{reqId}/status` podle `pollAfterSeconds`, dokud je stav `INPROCESS`. Pokud žádost v jednom běhu nevyřídí do 10 min, zkontroluje se znovu za 15 min (nejde o chybu).
+  4. Stav `ISSUED` nebo `DELIVERING`: `POST /request/{reqId}/claim-download`, validace jako při nahrání (ADR-007) a navíc stejné EIČ jako obnovovaný certifikát, uložení jako aktuální certifikát.
+  5. Teprve po úspěšném uložení `POST /request/{reqId}/ack-download` a smazání `renewal`. Do potvrzení jde certifikát stáhnout znovu (nejvýše 30 dní od vydání); při opakovaném stažení téhož certifikátu se znovu neinstaluje.
+  6. Stav `FINISHED`: převzetí už bylo potvrzeno. Pokud nový certifikát nemáme, je ztracený a podá se nová žádost.
+- Chyby (`last_renewal_error`, `next_renewal_attempt_at`, přežijí restart):
+  - síť, timeout, 5xx → opakovat po 1 h; 429 → podle `Retry-After`,
+  - `REJECTED` nebo nepoužitelný vydaný certifikát → stav `failed` s důvodem, nový pokus po 24 h,
+  - 401 → certifikát CA neuznává, nový pokus po 24 h; pokud mezitím vypršel, stav `expired`,
+  - 404 u rozběhnuté žádosti → žádost v CA neexistuje (např. propadla lhůta 30 dní), příště se podá nová.
 - Po vypršení certifikátu automatická obnova není možná (CA vyžaduje platný certifikát). Stav `expired` vyžaduje ruční vydání v DIS+ a nahrání (ADR-007).
 - `POST /api/v1/certificate/renew` spustí obnovu hned, pokud žádná neběží.
-- CA API URL:
+- CA API URL (`CA_EET_API_URLS` v core):
   - produkce `https://ca.caeet.gov.cz/api`,
-  - pro playground otevřená otázka. Playground certifikáty CA EET pravděpodobně neobnoví; ověřit, zda testovací CA (`ca.test` / `ca.zkus.caeet.gov.cz`) vydává testovací certifikáty.
+  - testovací `https://ca.test.caeet.gov.cz/api` a zkušební `https://ca.zkus.caeet.gov.cz/api`,
+  - pro playground otevřená otázka. Playground certifikáty CA EET pravděpodobně neobnoví; ověřit, zda testovací CA vydává testovací certifikáty. Bez nakonfigurovaného CA API se automatická obnova neprovádí a stav obnovy je `idle` s `automatic: false`.
+- Stavy obnovy (`renewal.state`):
+  - `idle` – není certifikát, nebo automatická obnova není k dispozici,
+  - `scheduled` – naplánovaná na `scheduled_at`,
+  - `in_progress` – žádost v CA EET běží,
+  - `failed` – poslední pokus selhal, další v `next_attempt_at`,
+  - `expired` – certifikát vypršel.
 - `/healthy` vrací chybu jen ve stavu `expired` (certifikát vypršel a obnova se nepovedla). Čerstvě nasazená služba bez certifikátu je zdravá (vzor teya ADR-004).
 
 ## ADR-009: Síťový model – bez autentizace, jen interní síť
