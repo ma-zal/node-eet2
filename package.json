@@ -17,6 +17,7 @@
     "test:playground": "node scripts/download-playground-fixtures.mjs && npm run test:playground --workspaces --if-present"
   },
   "devDependencies": {
+    "@changesets/cli": "^3.0.3",
     "@types/node": "^22.20.5",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",

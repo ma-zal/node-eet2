@@ -22,8 +22,8 @@ node-eet2/
 │   ├── core/      # npm balíček eet2-core
 │   └── server/    # eet2-server, publikuje se jen jako Docker image
 ├── docs/          # ADR
-├── .changeset/    # Changesets
-└── .github/       # CI a release
+├── .changeset/    # Changesets: config.json a čekající záznamy změn
+└── .github/       # CI (ci.yml); release.yml vznikne až před prvním vydáním
 ```
 
 Podrobně viz ADR-002.
@@ -49,14 +49,17 @@ Spouštět z kořene repozitáře:
 | `npm run typecheck` | typová kontrola |
 | `npm test` | unit testy (offline) |
 | `npm run test:playground` | stáhne oficiální testovací certifikáty do `.fixtures/playground/` a spustí integrační testy proti playground EET (síť; čtvrtek 20:00–6:00 bývá servisní okno) |
-| `npx changeset` | záznam změny pro příští release (Changesets zatím nejsou nastavené) |
+| `npx changeset` | záznam změny pro příští vydání (interaktivní; v neinteraktivním prostředí napsat soubor do `.changeset/` ručně) |
+| `npx changeset status` | co by se vydalo a v jakých verzích |
 | `docker build -t eet2-server:local .` | lokální Docker image serveru |
 
 Lokální vyzkoušení serveru proti playground je popsané v [README.md](README.md).
 
 ## Pravidla
 
-- Každá změna s dopadem na uživatele balíčku nebo image potřebuje changeset (`npx changeset`).
+- Každá změna s dopadem na uživatele balíčku nebo image potřebuje changeset (`npx changeset`). CI to u pull requestů kontroluje.
+- `eet2-server` závisí na `eet2-core` přesnou verzí, ne rozsahem. Díky tomu vydání core vydá i server (ADR-003).
+- Nic nepublikovat (npm, GHCR), dokud není implementace ověřená end-to-end se zebra-pos. Do té doby jen lokální build (ADR-003).
 - Nikdy necommitovat: privátní klíče, `.p12`, hesla, `.storage/`, `.fixtures/`.
 - Nikdy necommitovat PDF dokumenty z eet.gov.cz (část je označená TLP:AMBER). V dokumentaci jen odkaz na oficiální zdroj.
 - Nikdy nelogovat ani nevracet přes API: privátní klíč, heslo k `.p12`, obsah `.p12`, odpověď CA endpointu `claim-download`. Logovat jen explicitně pojmenovaná pole (ADR-012).

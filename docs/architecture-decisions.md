@@ -100,7 +100,7 @@ Core je knihovna na npm, server je Docker image, který core obsahuje. Změna v 
 - Tagy ve formátu Changesets: `eet2-core@X.Y.Z`, `eet2-server@X.Y.Z`.
 - `.changeset/config.json`:
   - `privatePackages: { version: true, tag: true }`: server se verzuje a taguje, i když se nepublikuje na npm.
-  - `updateInternalDependencies: "patch"`: každý bump core aktualizuje závislost serveru a server tím dostane automaticky patch bump.
+- Server závisí na core **přesnou verzí** (`"eet2-core": "1.0.0"`, ne `^1.0.0`). Každé vydání core je tak mimo rozsah serveru a Changesets serveru samy zvednou patch verzi a závislost. Volba `updateInternalDependencies` to v Changesets 3 nezajistí, ta upravuje jen balíčky ze stejného vydání. Experimentální `updateInternalDependents: "always"` má v názvu varování, že se může změnit i v patch verzi. Přesná verze navíc odpovídá skutečnosti, protože image obsahuje právě tuto verzi core.
 - Výsledek:
   - změna jen v serveru = release jen serveru,
   - změna v core = release core a automaticky i serveru.
@@ -109,9 +109,14 @@ Core je knihovna na npm, server je Docker image, který core obsahuje. Změna v 
   2. `changesets/action` na `master` otevře nebo aktualizuje PR „Version Packages“ (verze, `CHANGELOG.md` pro každý balíček).
   3. Merge tohoto PR spustí `changeset publish`: publikuje `eet2-core` na npm a vytvoří tagy.
   4. Docker build běží ve stejném `release.yml` podle výstupu `publishedPackages` (pokud obsahuje `eet2-server`). Tagy vytvořené přes `GITHUB_TOKEN` by samostatný workflow na tag nespustily.
-- Image `ghcr.io/ma-zal/eet2-server` (explicitně, ne výchozí název podle repozitáře). Tagy `X.Y.Z`, `X.Y`, `X`, `latest`. Navíc `edge` z každého pushe do `master` pro testy před releasem. Multi-arch `linux/amd64` + `linux/arm64` (Raspberry Pi).
+- Image `ghcr.io/ma-zal/eet2-server` (explicitně, ne výchozí název podle repozitáře). Tagy `X.Y.Z`, `X.Y`, `X`, `latest`. Multi-arch `linux/amd64` + `linux/arm64` (Raspberry Pi).
+- Zveřejňuje se jen ověřený build:
+  - Do prvního vydání se nepublikuje nic, ani npm balíček, ani image. Implementace se ověřuje end-to-end se zebra-pos proti playground EET nad lokálním buildem. zebra-pos ho sestavuje přes `build` v compose pod finálním názvem `ghcr.io/ma-zal/eet2-server:1`.
+  - První vydání je `1.0.0`. Verze `0.x` se nezveřejňují. Připravuje ho changeset `.changeset/first-release.md` (major pro oba balíčky).
+  - Žádný `edge` image z `master`. Neověřené změny se zkoušejí lokálním buildem, ne publikovaným image.
+  - `release.yml` vznikne až před prvním vydáním. `ci.yml` nic nepublikuje, a může proto vzniknout kdykoli.
 - npm publish s provenance: npm trusted publishing přes OIDC, případně secret `NPM_TOKEN`.
-- `ci.yml` na každý PR i push: `npm ci`, typecheck, testy všech workspaces.
+- `ci.yml` na každý PR i push: `npm ci`, typecheck, testy a build všech workspaces na Node 22 a 24, kontrola changesetů a zkušební Docker build bez publikace.
 
 ### Důsledky
 
