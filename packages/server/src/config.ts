@@ -24,7 +24,7 @@ export const CONFIG_FILE_NAME = 'config.cjs';
 const CONFIG_TEMPLATE = `// Konfigurace eet2-server. Po úpravě je nutný restart služby.
 module.exports = {
   // Prostředí EET – povinné:
-  //   'playground' – testovací prostředí pro vývojáře, POK není platný potvrzovací kód
+  //   'playground' – testovací provoz pro vývojáře, tržby se neevidují naostro
   //   'production' – ostrý provoz
   environment: '',
 

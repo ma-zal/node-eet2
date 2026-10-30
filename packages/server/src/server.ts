@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { CaEetClient, CertificateManager, EetClient } from 'eet2-core';
 import { buildApp } from './app.js';
-import { loadConfig, resolveCaApiUrl } from './config.js';
+import { loadConfig, resolveCaApiUrl, type ServerConfig } from './config.js';
 import { FileCertificateStore } from './file-certificate-store.js';
 import { log } from './logger.js';
 import { readVersions } from './versions.js';
@@ -12,7 +12,14 @@ const host = process.env.HOST ?? '0.0.0.0';
 const storageDir = path.resolve(process.env.EET2_STORAGE_DIR ?? '.storage');
 const passphrase = process.env.EET2_KEY_PASSPHRASE || undefined;
 
-const config = loadConfig(storageDir);
+let config: ServerConfig;
+try {
+  config = loadConfig(storageDir);
+} catch (error) {
+  // Chyba konfigurace je očekávaný stav (první start, překlep), stack trace by ji jen zakryl.
+  log('error', 'config_invalid', { message: error instanceof Error ? error.message : String(error) });
+  process.exit(1);
+}
 const caApiUrl = resolveCaApiUrl(config);
 const store = new FileCertificateStore(path.join(storageDir, 'certificate.json'), passphrase);
 

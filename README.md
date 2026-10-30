@@ -92,7 +92,7 @@ docker build -t eet2-server:local .
 docker run --rm -p 3000:3000 -v "$PWD/.storage:/app/.storage" eet2-server:local
 ```
 
-Playground mívá servisní okno zpravidla ve čtvrtek 20:00–6:00. Potvrzovací kód z playground končí `-ff` a není platný.
+Playground mívá servisní okno zpravidla ve čtvrtek 20:00–6:00. Potvrzovací kód z playground končí `-ff` a je jen testovací, tržbu nedokládá.
 
 ## Jazyk
 
