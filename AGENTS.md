@@ -22,8 +22,8 @@ node-eet2/
 │   ├── core/             # eet2-core, npm balíček
 │   └── signing-service/  # eet2-signing-service, publikuje se jen jako Docker image
 ├── docs/                 # ADR
-├── .changeset/           # Changesets: config.json a čekající záznamy změn
-└── .github/              # CI (ci.yml) a vydání z tagu (release.yml)
+├── .github/              # CI (ci.yml) a vydání přes Release Please (release.yml)
+└── release-please-config.json, .release-please-manifest.json
 ```
 
 Podrobně viz ADR-002.
@@ -34,7 +34,7 @@ Podrobně viz ADR-002.
 - npm workspaces
 - signing-service: Fastify + TypeBox, testy: Vitest
 - XML podpis: `xml-crypto` + `@xmldom/xmldom` (ověřeno v PoC)
-- Verzování: Changesets (ADR-003)
+- Verzování: Release Please z Conventional Commits (ADR-003)
 
 ## Skripty
 
@@ -49,29 +49,29 @@ Spouštět z kořene repozitáře:
 | `npm run typecheck` | typová kontrola |
 | `npm test` | unit testy (offline) |
 | `npm run test:playground` | stáhne oficiální testovací certifikáty do `.fixtures/playground/` a spustí integrační testy proti playground EET (síť; čtvrtek 20:00–6:00 bývá servisní okno) |
-| `npx changeset` | záznam změny pro příští vydání (interaktivní; v neinteraktivním prostředí napsat soubor do `.changeset/` ručně) |
-| `npx changeset status` | co by se vydalo a v jakých verzích |
-| `npm run version-packages` | verze a CHANGELOG z čekajících changesetů, srovná `package-lock.json` (viz Vydání) |
-| `npx changeset git-tag` | tagy pro nové verze; jejich push spustí vydání (viz Vydání) |
 | `docker build -t eet2-signing-service:local .` | lokální Docker image služby |
 
 Lokální vyzkoušení služby proti playground je popsané v [README.md](README.md).
 
 ## Vydání
 
-Vydání spouští tag na commitu v `master`, podrobně ADR-003.
+Verze a CHANGELOG určují commity (Conventional Commits), nic se nepíše ručně. Podrobně ADR-003.
 
-1. Na aktuálním `master`: `npm run version-packages`, kontrola diffu (verze, `CHANGELOG.md`, `package-lock.json`), commit „Version Packages“, push, počkat na zelené CI.
-2. `npx changeset git-tag` a push nových tagů (`git push origin eet2-core@X.Y.Z eet2-signing-service@X.Y.Z`).
-3. `release.yml` vydá `eet2-core@…` na npm a `eet2-signing-service@…` jako Docker image, obojí s GitHub Release.
+1. Každý push na `master` aktualizuje release PR, který udržuje Release Please (verze, `CHANGELOG.md`, `package-lock.json`).
+2. **Merge release PR = vydání.** Vzniknou tagy `eet2-core@X.Y.Z` / `eet2-signing-service@X.Y.Z` a GitHub Releases, `release.yml` pak po testech vydá core na npm a službu jako Docker image.
+3. Když publikace selže, release na GitHubu už existuje: `gh run rerun --failed`.
 
-Během 0.x je nekompatibilní změna changeset `minor`, ne `major`. `major` by vydal rovnou 1.0.0.
+Typ commitu určuje verzi. Během 0.x:
+- nekompatibilní změna (`feat!:` nebo patička `BREAKING CHANGE:`) = minor;
+- `feat` / `fix` / `perf` = patch;
+- přechod na 1.0.0 jen vědomě, patičkou `Release-As: 1.0.0`.
 
 ## Pravidla
 
-- Každá změna s dopadem na uživatele balíčku nebo image potřebuje changeset (`npx changeset`). CI to u pull requestů kontroluje.
+- Commity podle Conventional Commits: typ anglicky (`feat`, `fix`, `perf`, `deps`, `revert`, `docs`, `refactor`, `test`, `build`, `ci`, `chore`), popis česky. Typ určuje verzi a CHANGELOG balíčku, jehož soubory commit mění. `feat` / `fix` / `perf` / `deps` / `revert` se objeví v CHANGELOG, ostatní ne. Nekompatibilní změna `!` za typem nebo patička `BREAKING CHANGE:`.
 - `eet2-signing-service` závisí na `eet2-core` přesnou verzí, ne rozsahem. Díky tomu vydání core vydá i službu (ADR-003).
-- Publikuje jen `release.yml` z tagu na `master`. Nikdy ručně `npm publish` ani `docker push` (ADR-003).
+- Publikuje jen `release.yml` po merge release PR. Nikdy ručně `npm publish` ani `docker push` (ADR-003).
+- Závislosti s přesnou verzí (`.npmrc`: `save-exact=true`). Výjimka: runtime závislosti `eet2-core` s rozsahem `^`, přidávat explicitně `npm install -w eet2-core 'balíček@^X.Y.Z'` (ADR-010).
 - Nikdy necommitovat: privátní klíče, `.p12`, hesla, `.storage/`, `.fixtures/`.
 - Nikdy necommitovat PDF dokumenty z eet.gov.cz (část je označená TLP:AMBER). V dokumentaci jen odkaz na oficiální zdroj.
 - Nikdy nelogovat ani nevracet přes API: privátní klíč, heslo k `.p12`, obsah `.p12`, odpověď CA endpointu `claim-download`. Logovat jen explicitně pojmenovaná pole (ADR-012).

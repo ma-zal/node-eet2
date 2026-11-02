@@ -1,18 +1,17 @@
-# Vydání z tagu na master (ADR-003): eet2-core@X.Y.Z → npm, eet2-signing-service@X.Y.Z → Docker image.
-# Tagy vytváří `npx changeset git-tag`, pushuje je člověk. Postup vydání viz AGENTS.md.
+# Vydání přes Release Please (ADR-003). Každý push na master aktualizuje release PR (verze a CHANGELOG z Conventional
+# Commits). Merge release PR vytvoří tagy a GitHub Releases a stejný běh pak vydá eet2-core na npm a eet2-signing-service
+# jako Docker image. Tagy vytvořené přes GITHUB_TOKEN by samostatný workflow nespustily, proto vše v jednom.
 name: Release
 
 on:
   push:
-    tags:
-      - 'eet2-core@*'
-      - 'eet2-signing-service@*'
+    branches: [master]
 
 permissions:
   contents: read
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release
   cancel-in-progress: false
 
 env:
@@ -20,46 +19,36 @@ env:
   IMAGE: ghcr.io/ma-zal/eet2-signing-service
 
 jobs:
-  # Tag na commit v master, verze v tagu = verze v package.json, zelené testy. Jinak se nic nevydá.
-  verify:
+  release-please:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
     outputs:
-      package: ${{ steps.tag.outputs.package }}
-      version: ${{ steps.tag.outputs.version }}
+      core: ${{ steps.rp.outputs['packages/core--release_created'] }}
+      core_version: ${{ steps.rp.outputs['packages/core--version'] }}
+      service: ${{ steps.rp.outputs['packages/signing-service--release_created'] }}
+      service_version: ${{ steps.rp.outputs['packages/signing-service--version'] }}
+    steps:
+      - name: Release Please
+        id: rp
+        uses: googleapis/release-please-action@v5
+
+  # Nic se nevydá bez zelených testů. Release PR od GITHUB_TOKEN nespouští ci.yml.
+  verify:
+    needs: release-please
+    if: needs.release-please.outputs.core == 'true' || needs.release-please.outputs.service == 'true'
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
 
       - name: Set up Node.js
         uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
-
-      - name: Check tag
-        id: tag
-        run: |
-          tag="$GITHUB_REF_NAME"
-          package="${tag%@*}"
-          version="${tag##*@}"
-          case "$package" in
-            eet2-core) dir=packages/core ;;
-            eet2-signing-service) dir=packages/signing-service ;;
-            *) echo "::error::Tag $tag nepatří žádnému balíčku."; exit 1 ;;
-          esac
-          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/master; then
-            echo "::error::Tag $tag neukazuje na commit v master."
-            exit 1
-          fi
-          actual="$(node -p "require('./$dir/package.json').version")"
-          if [ "$actual" != "$version" ]; then
-            echo "::error::Verze v tagu $tag neodpovídá $dir/package.json ($actual)."
-            exit 1
-          fi
-          echo "package=$package" >> "$GITHUB_OUTPUT"
-          echo "version=$version" >> "$GITHUB_OUTPUT"
 
       - name: Install dependencies
         run: npm ci
@@ -71,11 +60,11 @@ jobs:
         run: npm test
 
   npm:
-    needs: verify
-    if: needs.verify.outputs.package == 'eet2-core'
+    needs: [release-please, verify]
+    if: needs.release-please.outputs.core == 'true'
     runs-on: ubuntu-latest
     permissions:
-      contents: write # GitHub Release
+      contents: read
       id-token: write # npm trusted publishing (OIDC) a provenance
     steps:
       - name: Checkout
@@ -86,6 +75,7 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
+          registry-url: https://registry.npmjs.org
 
       - name: Install dependencies
         run: npm ci
@@ -103,20 +93,12 @@ jobs:
           fi
           npm publish -w eet2-core
 
-      - name: GitHub Release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ needs.verify.outputs.version }}
-        run: |
-          node scripts/changelog-section.mjs packages/core/CHANGELOG.md "$VERSION" > "$RUNNER_TEMP/notes.md"
-          gh release create "$GITHUB_REF_NAME" --verify-tag --title "$GITHUB_REF_NAME" --notes-file "$RUNNER_TEMP/notes.md"
-
   docker:
-    needs: verify
-    if: needs.verify.outputs.package == 'eet2-signing-service'
+    needs: [release-please, verify]
+    if: needs.release-please.outputs.service == 'true'
     runs-on: ubuntu-latest
     permissions:
-      contents: write # GitHub Release
+      contents: read
       packages: write
     steps:
       - name: Checkout
@@ -126,7 +108,7 @@ jobs:
       - name: Image tags
         id: tags
         env:
-          VERSION: ${{ needs.verify.outputs.version }}
+          VERSION: ${{ needs.release-please.outputs.service_version }}
         run: |
           IFS=. read -r major minor _ <<< "$VERSION"
           tags="$IMAGE:$VERSION,$IMAGE:$major.$minor,$IMAGE:latest"
@@ -154,7 +136,7 @@ jobs:
           context: .
           platforms: linux/amd64
           build-args: |
-            VERSION=${{ needs.verify.outputs.version }}
+            VERSION=${{ needs.release-please.outputs.service_version }}
             GIT_SHA=${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
@@ -167,15 +149,7 @@ jobs:
           push: true
           tags: ${{ steps.tags.outputs.tags }}
           build-args: |
-            VERSION=${{ needs.verify.outputs.version }}
+            VERSION=${{ needs.release-please.outputs.service_version }}
             GIT_SHA=${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-
-      - name: GitHub Release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ needs.verify.outputs.version }}
-        run: |
-          node scripts/changelog-section.mjs packages/signing-service/CHANGELOG.md "$VERSION" > "$RUNNER_TEMP/notes.md"
-          gh release create "$GITHUB_REF_NAME" --verify-tag --title "$GITHUB_REF_NAME" --notes-file "$RUNNER_TEMP/notes.md"

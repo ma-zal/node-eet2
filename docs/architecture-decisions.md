@@ -75,8 +75,9 @@ node-eet2/
 │       └── test/
 ├── docs/architecture-decisions.md
 ├── scripts/                  # download-playground-fixtures.mjs
-├── .changeset/
 ├── .github/workflows/        # ci.yml, release.yml
+├── release-please-config.json, .release-please-manifest.json
+├── .npmrc                    # save-exact=true
 ├── AGENTS.md
 ├── LICENSE                   # MIT
 └── README.md
@@ -88,44 +89,47 @@ node-eet2/
 - Technické přílohy pro vývojáře (XSD, WSDL, `caeetapi_jwt.yml`) a veřejné certifikáty CA EET jsou součástí core.
 - PDF dokumenty z eet.gov.cz v repozitáři nejsou. Část je označená TLP:AMBER, odkazujeme na oficiální zdroj.
 
-## ADR-003: Verzování a release přes Changesets
+## ADR-003: Verzování a release přes Release Please
 
 ### Kontext
 
-Core je knihovna na npm, signing-service je Docker image, který core obsahuje. Změna v core musí vždy vyrobit nové image. Změna jen ve službě nesmí vydat nový, ale identický core.
+Core je knihovna na npm, signing-service je Docker image, který core obsahuje. Změna v core musí vždy vyrobit nové image. Změna jen ve službě nesmí vydat nový, ale identický core. Verze ani CHANGELOG se nemají psát ručně.
 
 ### Rozhodnutí
 
-- Oba balíčky mají vlastní semver: `eet2-core` (veřejný, npm) a `eet2-signing-service` (`private: true`, jen Docker image).
-- Tagy ve formátu Changesets: `eet2-core@X.Y.Z`, `eet2-signing-service@X.Y.Z`. Push tagu spouští vydání daného balíčku.
-- `.changeset/config.json`:
-  - `privatePackages: { version: true, tag: true }`: služba se verzuje a taguje, i když se nepublikuje na npm.
-- signing-service závisí na core **přesnou verzí** (`"eet2-core": "0.1.0"`, ne `^0.1.0`). Každé vydání core je tak mimo rozsah služby a Changesets jí samy zvednou patch verzi a závislost. Volba `updateInternalDependencies` to v Changesets 3 nezajistí, ta upravuje jen balíčky ze stejného vydání. Experimentální `updateInternalDependents: "always"` má v názvu varování, že se může změnit i v patch verzi. Přesná verze navíc odpovídá skutečnosti, protože image obsahuje právě tuto verzi core.
-- Výsledek:
+- Oba balíčky mají vlastní semver: `eet2-core` (veřejný, npm) a `eet2-signing-service` (`private: true`, jen Docker image). Tagy `eet2-core@X.Y.Z` a `eet2-signing-service@X.Y.Z`.
+- Verze a `CHANGELOG.md` každého balíčku odvozuje Release Please z commitů podle [Conventional Commits](https://www.conventionalcommits.org/) (`release-please-config.json`, `.release-please-manifest.json`):
+  - commit se počítá k balíčku, jehož soubory mění; commit jen mimo `packages/` nevydá nic;
+  - v CHANGELOG se objeví `feat` (Nové funkce), `fix` (Opravy), `perf`, `deps` a `revert`; `docs`, `refactor`, `test`, `build`, `ci` a `chore` ne;
+  - nekompatibilní změna: `!` za typem (`feat!:`) nebo patička `BREAKING CHANGE:`.
+- Verze 0.x (`bump-minor-pre-major`, `bump-patch-for-minor-pre-major`):
+  - nekompatibilní změna = minor, `feat` / `fix` / `perf` = patch;
+  - přechod na `1.0.0` jen vědomě, patičkou `Release-As: 1.0.0` v commitu;
+  - první vydání je `0.1.0` (`initial-version`). `bootstrap-sha` omezí jeho CHANGELOG na commit „první veřejné vydání“, bez historie vývoje se staršími názvy balíčků. Po prvním vydání se ignoruje.
+- signing-service závisí na core **přesnou verzí** (`"eet2-core": "0.1.0"`, ne `^0.1.0`), protože image obsahuje právě tuto verzi. Plugin `node-workspace` při vydání core zvedne službě patch verzi, přepíše závislost opět na přesnou verzi a srovná kořenový `package-lock.json`. Výsledek:
   - změna jen ve službě = release jen služby,
   - změna v core = release core a automaticky i služby.
-- Verze 0.x:
-  - První vydání je `0.1.0`. Kdy přejít na `1.0.0`, se rozhodne později.
-  - Changesets řadu 0.x zvlášť neřeší: changeset `major` na `0.Y.Z` vydá rovnou `1.0.0`. Během 0.x je proto nekompatibilní změna `minor` a ostatní změny `patch`. `major` jen pro vědomý přechod na `1.0.0`.
-- Vydání spouští člověk tagem na commitu v `master`, ne push na `master`:
-  1. Ke každé změně s dopadem na uživatele se přidá changeset (`npx changeset`).
-  2. Na aktuálním `master`: `npm run version-packages` = `changeset version` (verze, `CHANGELOG.md` pro každý balíček, smazání použitých changesetů) a synchronizace `package-lock.json`. `changeset version` lockfile nemění a bez synchronizace by `npm ci` v CI i v Dockerfile selhalo. Kontrola diffu, commit „Version Packages“, push, zelené CI.
-  3. `npx changeset git-tag` vytvoří tagy pro verze, které tag ještě nemají. Pak push těchto tagů.
-  4. `release.yml` běží pro každý tag zvlášť:
-     - `verify`: tag ukazuje na commit v `master`, verze v tagu odpovídá `package.json` balíčku, typecheck a testy projdou. Jinak se nic nevydá.
-     - `eet2-core@…`: `npm publish` přes npm trusted publishing (OIDC) s provenance, záložně secret `NPM_TOKEN`.
-     - `eet2-signing-service@…`: build a push image.
-     - Pro každý tag GitHub Release s poznámkami ze sekce verze v `CHANGELOG.md` balíčku (`scripts/changelog-section.mjs`).
-  - Tag pushuje člověk, proto workflow spustí. Tagy pushnuté přes `GITHUB_TOKEN` by ho nespustily. PR „Version Packages“ ani `changesets/action` nejsou potřeba.
+- Průběh:
+  1. Každý push na `master` spustí `release.yml`. Release Please v něm otevře nebo aktualizuje release PR s novými verzemi, CHANGELOG a lockfile.
+  2. **Merge release PR = vydání.** Release Please vytvoří tagy a GitHub Releases s poznámkami z CHANGELOG.
+  3. Stejný běh `release.yml` pak podle výstupů Release Please spustí typecheck a testy a vydá:
+     - `eet2-core` přes `npm publish` s npm trusted publishing (OIDC) a provenance, záložně secret `NPM_TOKEN`;
+     - `eet2-signing-service` jako build a push image.
+  - Vše je v jednom workflow, protože tagy a releases vytvořené přes `GITHUB_TOKEN` by samostatný workflow nespustily. Ze stejného důvodu release PR nespouští `ci.yml`, testy proto běží v `release.yml` před publikací.
+  - Když publikace selže, release na GitHubu už existuje. Běh se zopakuje (`gh run rerun --failed`).
 - Image `ghcr.io/ma-zal/eet2-signing-service` (explicitně, ne výchozí název podle repozitáře). Tagy `X.Y.Z`, `X.Y`, `X`, `latest`. Během 0.x bez tagu `X`, protože `0` by zahrnoval i nekompatibilní minor verze. Multi-arch `linux/amd64` + `linux/arm64` (Raspberry Pi).
 - Publikuje jen `release.yml`, nikdy ruční `npm publish` ani `docker push`. Žádný `edge` image z `master`. Neověřené změny se zkoušejí lokálním buildem, ne publikovaným image.
-- Jednorázové nastavení mimo repozitář: trusted publisher pro `eet2-core` na npmjs.com (repozitář `ma-zal/node-eet2`, workflow `release.yml`) a veřejný balíček `eet2-signing-service` v GHCR.
-- `ci.yml` na každý PR i push: `npm ci`, typecheck, testy a build všech workspaces na Node 22, 24 a 26, kontrola changesetů a zkušební Docker build bez publikace.
+- Jednorázové nastavení mimo repozitář:
+  - trusted publisher pro `eet2-core` na npmjs.com (repozitář `ma-zal/node-eet2`, workflow `release.yml`);
+  - veřejný balíček `eet2-signing-service` v GHCR;
+  - v repozitáři povolené „Allow GitHub Actions to create and approve pull requests“, jinak Release Please PR neotevře.
+- `ci.yml` na každý PR i push: `npm ci`, typecheck, testy a build všech workspaces na Node 22, 24 a 26 a zkušební Docker build bez publikace.
 
 ### Důsledky
 
 - Nekompatibilní změna HTTP API znamená od `1.0.0` major verzi služby a novou cestu `/api/v2`. `/api/v1` po přechodnou dobu zůstává. Během 0.x je to minor verze a cesta zůstává `/api/v1`.
 - Uživatelé pinují major (`eet2-signing-service:1`), během 0.x minor (`eet2-signing-service:0.1`).
+- Zpráva commitu je součástí vydání: špatný typ znamená špatnou verzi nebo chybějící řádek v CHANGELOG. Release PR je místo, kde se to před vydáním zkontroluje.
 - Dohledatelnost: OCI labely image (`org.opencontainers.image.version`, `org.opencontainers.image.revision`) a `GET /api/v1/status` vrací `service_version`, `core_version`, `git_sha`.
 
 ## ADR-004: Jazyk a pojmenování
@@ -398,6 +402,7 @@ Jen pro věci svázané s procesem a kontejnerem:
 ## ADR-010: Technologie
 
 - Node.js ≥ 22, TypeScript, ESM, `NodeNext`. Podporované verze ověřuje CI (22, 24, 26). Docker image a vydání běží na aktuálním LTS, Node 26.
+- Závislosti s přesnou verzí (`.npmrc`: `save-exact=true`), aktualizace se dělají vědomě. Výjimka: runtime závislosti publikované knihovny `eet2-core` (`xml-crypto`, `node-forge`, `@xmldom/xmldom`) mají rozsah `^`. Přesné verze by uživatelům knihovny zdvojovaly balíčky a bezpečnostní opravy by k nim došly až s novou verzí `eet2-core`. npm čte `.npmrc` jen z kořene workspaces, proto se nová runtime závislost core přidává s explicitním rozsahem (`npm install -w eet2-core 'balíček@^X.Y.Z'`).
 - signing-service: Fastify + TypeBox (schémata = validace + typy), stejně jako teya ADR-008.
 - XML podpis a parsování: `xml-crypto` + `@xmldom/xmldom` (ověřeno v PoC).
 - `.p12`: node-forge (pure JS, podporuje legacy 3DES; ověřeno na oficiálních testovacích certifikátech z playground).

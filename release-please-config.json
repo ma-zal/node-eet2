@@ -1,0 +1,30 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "release-type": "node",
+  "initial-version": "0.1.0",
+  "bump-minor-pre-major": true,
+  "bump-patch-for-minor-pre-major": true,
+  "include-component-in-tag": true,
+  "tag-separator": "@",
+  "include-v-in-tag": false,
+  "include-v-in-release-name": false,
+  "pull-request-header": "Vydání připravené Release Please. **Merge tohoto PR vydá balíčky** na npm a do GHCR (ADR-003).",
+  "changelog-sections": [
+    { "type": "feat", "section": "Nové funkce" },
+    { "type": "fix", "section": "Opravy" },
+    { "type": "perf", "section": "Výkon" },
+    { "type": "deps", "section": "Závislosti" },
+    { "type": "revert", "section": "Vrácené změny" },
+    { "type": "docs", "section": "Dokumentace", "hidden": true },
+    { "type": "refactor", "section": "Refaktoring", "hidden": true },
+    { "type": "test", "section": "Testy", "hidden": true },
+    { "type": "build", "section": "Build", "hidden": true },
+    { "type": "ci", "section": "CI", "hidden": true },
+    { "type": "chore", "section": "Údržba", "hidden": true }
+  ],
+  "plugins": ["node-workspace"],
+  "packages": {
+    "packages/core": { "component": "eet2-core" },
+    "packages/signing-service": { "component": "eet2-signing-service" }
+  }
+}

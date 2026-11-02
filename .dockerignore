@@ -4,7 +4,8 @@
 **/*.tsbuildinfo
 .git
 .github
-.changeset
+release-please-config.json
+.release-please-manifest.json
 .storage
 .fixtures
 docs

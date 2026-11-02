@@ -1,4 +1,4 @@
-# Testy a zkušební build. Nic nepublikuje: vydání řeší release.yml z tagu na master (ADR-003).
+# Testy a zkušební build. Nic nepublikuje: vydání řeší release.yml přes Release Please (ADR-003).
 name: CI
 
 on:
@@ -36,29 +36,6 @@ jobs:
 
       - name: Build
         run: npm run build
-
-  # Každá změna s dopadem na uživatele balíčku nebo image potřebuje changeset (AGENTS.md).
-  # Změnu bez dopadu (testy, interní úpravy) označí `npx changeset --empty`.
-  changesets:
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version: 26
-          cache: npm
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Check changesets
-        run: npx changeset status --since=origin/${{ github.base_ref }}
 
   docker:
     runs-on: ubuntu-latest
