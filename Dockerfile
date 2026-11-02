@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # ---- build: TypeScript → dist ----
-FROM node:24-alpine AS build
+FROM node:26-alpine AS build
 WORKDIR /app
 COPY package.json package-lock.json tsconfig.base.json ./
 COPY packages/core/package.json packages/core/
@@ -12,7 +12,7 @@ COPY packages/signing-service packages/signing-service
 RUN npm run build
 
 # ---- runtime: jen produkční závislosti a sestavený kód ----
-FROM node:24-alpine AS runtime
+FROM node:26-alpine AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 COPY package.json package-lock.json ./

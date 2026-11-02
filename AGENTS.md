@@ -23,7 +23,7 @@ node-eet2/
 │   └── signing-service/  # eet2-signing-service, publikuje se jen jako Docker image
 ├── docs/                 # ADR
 ├── .changeset/           # Changesets: config.json a čekající záznamy změn
-└── .github/              # CI (ci.yml); release.yml vznikne až před prvním vydáním
+└── .github/              # CI (ci.yml) a vydání z tagu (release.yml)
 ```
 
 Podrobně viz ADR-002.
@@ -51,15 +51,27 @@ Spouštět z kořene repozitáře:
 | `npm run test:playground` | stáhne oficiální testovací certifikáty do `.fixtures/playground/` a spustí integrační testy proti playground EET (síť; čtvrtek 20:00–6:00 bývá servisní okno) |
 | `npx changeset` | záznam změny pro příští vydání (interaktivní; v neinteraktivním prostředí napsat soubor do `.changeset/` ručně) |
 | `npx changeset status` | co by se vydalo a v jakých verzích |
+| `npm run version-packages` | verze a CHANGELOG z čekajících changesetů, srovná `package-lock.json` (viz Vydání) |
+| `npx changeset git-tag` | tagy pro nové verze; jejich push spustí vydání (viz Vydání) |
 | `docker build -t eet2-signing-service:local .` | lokální Docker image služby |
 
 Lokální vyzkoušení služby proti playground je popsané v [README.md](README.md).
+
+## Vydání
+
+Vydání spouští tag na commitu v `master`, podrobně ADR-003.
+
+1. Na aktuálním `master`: `npm run version-packages`, kontrola diffu (verze, `CHANGELOG.md`, `package-lock.json`), commit „Version Packages“, push, počkat na zelené CI.
+2. `npx changeset git-tag` a push nových tagů (`git push origin eet2-core@X.Y.Z eet2-signing-service@X.Y.Z`).
+3. `release.yml` vydá `eet2-core@…` na npm a `eet2-signing-service@…` jako Docker image, obojí s GitHub Release.
+
+Během 0.x je nekompatibilní změna changeset `minor`, ne `major`. `major` by vydal rovnou 1.0.0.
 
 ## Pravidla
 
 - Každá změna s dopadem na uživatele balíčku nebo image potřebuje changeset (`npx changeset`). CI to u pull requestů kontroluje.
 - `eet2-signing-service` závisí na `eet2-core` přesnou verzí, ne rozsahem. Díky tomu vydání core vydá i službu (ADR-003).
-- Nic nepublikovat (npm, GHCR), dokud není implementace ověřená end-to-end se zebra-pos. Do té doby jen lokální build (ADR-003).
+- Publikuje jen `release.yml` z tagu na `master`. Nikdy ručně `npm publish` ani `docker push` (ADR-003).
 - Nikdy necommitovat: privátní klíče, `.p12`, hesla, `.storage/`, `.fixtures/`.
 - Nikdy necommitovat PDF dokumenty z eet.gov.cz (část je označená TLP:AMBER). V dokumentaci jen odkaz na oficiální zdroj.
 - Nikdy nelogovat ani nevracet přes API: privátní klíč, heslo k `.p12`, obsah `.p12`, odpověď CA endpointu `claim-download`. Logovat jen explicitně pojmenovaná pole (ADR-012).

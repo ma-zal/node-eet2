@@ -18,10 +18,15 @@
     },
     "./package.json": "./package.json"
   },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "files": [
     "dist",
     "certs",
-    "schema"
+    "schema",
+    "CHANGELOG.md"
   ],
   "engines": {
     "node": ">=22.12"

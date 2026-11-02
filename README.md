@@ -20,7 +20,7 @@ eet2 tržbu podepíše, odešle a vrátí výsledek. **Frontu tržeb, opakován�
 ```yaml
 services:
   eet2-signing-service:
-    image: ghcr.io/ma-zal/eet2-signing-service:1   # zatím nevydáno – lokálně: docker build -t eet2-signing-service:local .
+    image: ghcr.io/ma-zal/eet2-signing-service:0.1   # během 0.x pinovat minor verzi (ADR-003)
     restart: unless-stopped
     volumes:
       - ./storage-eet2:/app/.storage   # konfigurace, certifikát s privátním klíčem, stav obnovy
