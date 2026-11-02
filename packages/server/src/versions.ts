@@ -13,7 +13,7 @@ export interface Versions {
 export function readVersions(): Versions {
   // src/ i dist/ leží o úroveň níž než package.json.
   const server = require('../package.json') as { version: string };
-  const core = require('eet2-core/package.json') as { version: string };
+  const core = require('cz-eet2-core/package.json') as { version: string };
   const gitSha = process.env.GIT_SHA?.trim();
   return {
     server_version: server.version,

@@ -71,6 +71,8 @@ export type RenewalStateName = 'idle' | 'scheduled' | 'in_progress' | 'failed' |
 
 /** Stav certifikátu bez citlivých údajů, určený k zobrazení (např. `GET /api/v1/status`). */
 export interface CertificateStatus {
+  /** Prostředí EET, pro které je certifikát vydán. Chybí, pokud certifikát není nahrán. */
+  environment?: EetEnvironment;
   certificate?: {
     eic: string;
     serial_number: string;
@@ -82,7 +84,7 @@ export interface CertificateStatus {
   };
   renewal: {
     state: RenewalStateName;
-    /** Je k dispozici automatická obnova (nakonfigurované CA EET API). */
+    /** Je k dispozici automatická obnova (nakonfigurované CA EET API pro prostředí certifikátu). */
     automatic: boolean;
     scheduled_at?: string;
     next_attempt_at?: string;
@@ -100,10 +102,8 @@ export type CertificateManagerLog = (
 
 export interface CertificateManagerOptions {
   store: CertificateStore;
-  /** Prostředí služby. Nahrát lze jen certifikát vydaný CA EET pro toto prostředí. */
-  environment: EetEnvironment;
-  /** CA EET API. Bez něj se automatická obnova neprovádí (např. playground). */
-  ca?: CaEetApi;
+  /** CA EET API pro jednotlivá prostředí. Pro prostředí bez něj se automatická obnova neprovádí (např. playground). */
+  ca?: Partial<Record<EetEnvironment, CaEetApi>>;
   /** Kolik dní před koncem platnosti začít obnovu. Výchozí 21 (CA EET doporučuje 2–3 týdny). */
   renewBeforeDays?: number;
   /** Prodleva po chybě (síť, 5xx, ...). Výchozí 1 h. */
@@ -122,13 +122,13 @@ export interface CertificateManagerOptions {
 }
 
 const DAY_MS = 86_400_000;
-const ENVIRONMENT_LABELS: Record<EetEnvironment, string> = { playground: 'playground', production: 'produkce' };
 
 /** Žádost CA zamítla nebo nový certifikát není použitelný – další pokus až po delší prodlevě. */
 class RenewalRejectedError extends Error {}
 
 /**
  * Spravuje pokladní certifikát: nahrání `.p12`, stav pro zobrazení a automatickou obnovu přes CA EET (ADR-008).
+ * Prostředí EET (playground / produkce) určuje certifikát podle CA EET, která ho vydala (ADR-007).
  *
  * Postup obnovy: `not-finished` (navázání na rozběhnutou žádost) → `renew` → polling `status` →
  * `claim-download` → uložení nového certifikátu → `ack-download`. Rozběhnutá žádost je uložená ve stavu,
@@ -136,13 +136,14 @@ class RenewalRejectedError extends Error {}
  */
 export class CertificateManager {
   private state: CertificateState = { version: 1 };
+  /** Prostředí aktuálního certifikátu. Odvozuje se z certifikátu, neukládá se. */
+  private environment: EetEnvironment | undefined;
   private running = false;
   private queue: Promise<unknown> = Promise.resolve();
   private timer: NodeJS.Timeout | undefined;
 
   private readonly store: CertificateStore;
-  private readonly environment: EetEnvironment;
-  private readonly ca: CaEetApi | undefined;
+  private readonly ca: Partial<Record<EetEnvironment, CaEetApi>>;
   private readonly renewBeforeMs: number;
   private readonly retryAfterErrorMs: number;
   private readonly retryAfterRejectionMs: number;
@@ -155,8 +156,7 @@ export class CertificateManager {
 
   constructor(options: CertificateManagerOptions) {
     this.store = options.store;
-    this.environment = options.environment;
-    this.ca = options.ca;
+    this.ca = options.ca ?? {};
     this.renewBeforeMs = (options.renewBeforeDays ?? 21) * DAY_MS;
     this.retryAfterErrorMs = options.retryAfterErrorMs ?? 3_600_000;
     this.retryAfterRejectionMs = options.retryAfterRejectionMs ?? DAY_MS;
@@ -173,6 +173,13 @@ export class CertificateManager {
   async load(): Promise<void> {
     await this.exclusive(async () => {
       this.state = (await this.store.load()) ?? { version: 1 };
+      this.environment = this.state.current ? this.detectEnvironment(this.state.current) : undefined;
+      if (this.state.current && !this.environment) {
+        // Při nahrání se to kontroluje, sem se dostane jen ručně upravený stav.
+        this.log('error', 'Uložený certifikát nevydala certifikační autorita EET, tržby nepůjde odeslat.', {
+          serial_number: this.state.current.serial_number,
+        });
+      }
     });
   }
 
@@ -181,8 +188,13 @@ export class CertificateManager {
     return this.state.current;
   }
 
+  /** Prostředí EET aktuálního certifikátu, nebo `undefined`, pokud certifikát není nahrán. */
+  getEnvironment(): EetEnvironment | undefined {
+    return this.environment;
+  }
+
   getStatus(): CertificateStatus {
-    const automatic = this.ca !== undefined;
+    const automatic = this.currentCa() !== undefined;
     const current = this.state.current;
     if (!current) {
       return { renewal: { state: 'idle', automatic } };
@@ -217,19 +229,22 @@ export class CertificateManager {
       if (this.state.renewal.ca_state) renewal.ca_state = this.state.renewal.ca_state;
     }
     if (this.state.last_renewal_error) renewal.last_error = this.state.last_renewal_error;
-    return { certificate, renewal };
+    return { ...(this.environment ? { environment: this.environment } : {}), certificate, renewal };
   }
 
   /**
    * Nahraje certifikát ze souboru `.p12` (ručně vydaný v DIS+). Zkontroluje, že ho vydala CA EET
-   * pro prostředí služby a že je právě platný. Dosavadní certifikát se přesune do `previous`.
+   * pro zvolené prostředí a že je právě platný. Dosavadní certifikát se přesune do `previous`.
+   * Prostředí služby se tím nastaví podle certifikátu, i když bylo dosud jiné.
    *
+   * @param environment prostředí, které zvolil správce. Musí odpovídat certifikátu, aby záměna
+   *   certifikátu nezměnila prostředí omylem (ADR-007).
    * @throws {EetCertificateError} se srozumitelnou zprávou, pokud certifikát nelze použít.
    */
-  async installPkcs12(pkcs12: Uint8Array, password: string): Promise<CertificateStatus> {
+  async installPkcs12(pkcs12: Uint8Array, password: string, environment: EetEnvironment): Promise<CertificateStatus> {
     return this.exclusive(async () => {
-      const credentials = this.validate(loadPkcs12(pkcs12, password));
-      this.replaceCurrent(credentials, 'upload');
+      const credentials = this.validate(loadPkcs12(pkcs12, password), environment);
+      this.replaceCurrent(credentials, environment, 'upload');
       delete this.state.renewal;
       this.clearRenewalErrors();
       await this.store.save(this.state);
@@ -246,7 +261,7 @@ export class CertificateManager {
 
   /** Spustí obnovu hned, bez ohledu na termín a prodlevu po chybě. U prošlého certifikátu nic neudělá. */
   async renewNow(): Promise<CertificateStatus> {
-    if (!this.ca) {
+    if (!this.currentCa()) {
       throw new Error('Automatická obnova není k dispozici: CA EET API není nakonfigurované.');
     }
     await this.renew(true);
@@ -275,7 +290,7 @@ export class CertificateManager {
 
   private isRenewalDue(force: boolean): boolean {
     const current = this.state.current;
-    if (!this.ca || !current) {
+    if (!this.currentCa() || !current) {
       return false;
     }
     const now = this.now().getTime();
@@ -294,9 +309,10 @@ export class CertificateManager {
   private renew(force: boolean): Promise<void> {
     return this.exclusive(async () => {
       // Kontrola až uvnitř zámku – souběžné kontroly nesmí podat dvě žádosti.
-      const ca = this.ca;
+      const ca = this.currentCa();
       const current = this.state.current;
-      if (!ca || !current || !this.isRenewalDue(force)) {
+      const environment = this.environment;
+      if (!ca || !current || !environment || !this.isRenewalDue(force)) {
         return;
       }
       if (force) {
@@ -304,7 +320,7 @@ export class CertificateManager {
       }
       this.running = true;
       try {
-        await this.runRenewal(ca, current);
+        await this.runRenewal(ca, current, environment);
       } catch (error) {
         await this.handleRenewalError(error);
       } finally {
@@ -313,7 +329,7 @@ export class CertificateManager {
     });
   }
 
-  private async runRenewal(ca: CaEetApi, current: StoredCertificate): Promise<void> {
+  private async runRenewal(ca: CaEetApi, current: StoredCertificate, environment: EetEnvironment): Promise<void> {
     let renewal = this.state.renewal;
     let renewing = renewal ? this.findBySerialNumber(renewal.renewing_serial_number) : undefined;
 
@@ -352,13 +368,13 @@ export class CertificateManager {
         const issued = await ca.claimDownload(renewing, renewal.req_id);
         let credentials: EetCredentials;
         try {
-          credentials = this.validate(loadPkcs12(issued.pkcs12, issued.password), renewing.eic);
+          credentials = this.validate(loadPkcs12(issued.pkcs12, issued.password), environment, renewing.eic);
         } catch (error) {
           throw new RenewalRejectedError(`Obnovený certifikát nelze použít: ${error instanceof Error ? error.message : String(error)}`);
         }
         // Při opakovaném stažení (např. po pádu před potvrzením) je certifikát už nainstalovaný.
         if (credentials.serial_number !== this.state.current?.serial_number) {
-          this.replaceCurrent(credentials, 'renewal');
+          this.replaceCurrent(credentials, environment, 'renewal');
           // Uložit před potvrzením převzetí – do potvrzení jde certifikát stáhnout znovu.
           await this.store.save(this.state);
           this.log('info', 'Nainstalován obnovený pokladní certifikát.', {
@@ -416,15 +432,15 @@ export class CertificateManager {
     });
   }
 
-  /** Ověří, že certifikát vydala CA EET pro prostředí služby a že je právě platný. */
-  private validate(credentials: EetCredentials, expectedEic?: string): EetCredentials {
+  /** Ověří, že certifikát vydala CA EET pro očekávané prostředí a že je právě platný. */
+  private validate(credentials: EetCredentials, expectedEnvironment: EetEnvironment, expectedEic?: string): EetCredentials {
     const environment = this.detectEnvironment(credentials);
     if (environment === undefined) {
       throw new EetCertificateError('Certifikát nevydala certifikační autorita EET.');
     }
-    if (environment !== this.environment) {
+    if (environment !== expectedEnvironment) {
       throw new EetCertificateError(
-        `Certifikát je vydán pro prostředí ${ENVIRONMENT_LABELS[environment]}, služba běží v prostředí ${ENVIRONMENT_LABELS[this.environment]}.`,
+        `Certifikát je vydán pro prostředí ${environment}, ne pro zvolené prostředí ${expectedEnvironment}.`,
       );
     }
     const now = this.now().getTime();
@@ -437,11 +453,17 @@ export class CertificateManager {
     return credentials;
   }
 
-  private replaceCurrent(credentials: EetCredentials, source: StoredCertificate['source']): void {
+  private replaceCurrent(credentials: EetCredentials, environment: EetEnvironment, source: StoredCertificate['source']): void {
     if (this.state.current && this.state.current.serial_number !== credentials.serial_number) {
       this.state.previous = this.state.current;
     }
     this.state.current = { ...credentials, installed_at: this.now().toISOString(), source };
+    this.environment = environment;
+  }
+
+  /** CA EET API pro prostředí aktuálního certifikátu. */
+  private currentCa(): CaEetApi | undefined {
+    return this.environment ? this.ca[this.environment] : undefined;
   }
 
   private findBySerialNumber(serialNumber: string): StoredCertificate | undefined {

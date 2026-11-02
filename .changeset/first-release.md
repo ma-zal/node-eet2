@@ -1,5 +1,5 @@
 ---
-"eet2-core": major
+"cz-eet2-core": major
 "eet2-server": major
 ---
 

@@ -1,8 +1,12 @@
 import { Type, type Static } from '@sinclair/typebox';
 
+export const EnvironmentSchema = Type.Union([Type.Literal('playground'), Type.Literal('production')]);
+
 /** Tělo `POST /api/v1/sales` (ADR-005). Názvy převzaté doslova z rozhraní EET. */
 export const SaleRequestSchema = Type.Object(
   {
+    /** Prostředí, do kterého tržba patří. Musí odpovídat certifikátu, jinak se neodešle. */
+    environment: EnvironmentSchema,
     prvni_zaslani: Type.Boolean(),
     overeni: Type.Optional(Type.Boolean()),
     data: Type.Object(
@@ -25,11 +29,13 @@ export const SaleRequestSchema = Type.Object(
 );
 export type SaleRequest = Static<typeof SaleRequestSchema>;
 
-/** Tělo `PUT /api/v1/certificate` – názvy shodné s `Pkcs12DTO` z CA EET API. */
+/** Tělo `PUT /api/v1/certificate` – `pkcs12` a `password` shodné s `Pkcs12DTO` z CA EET API. */
 export const CertificateUploadSchema = Type.Object(
   {
     pkcs12: Type.String({ minLength: 1, description: 'Obsah souboru .p12 v base64' }),
     password: Type.String({ minLength: 1 }),
+    /** Prostředí, které zvolil správce. Musí odpovídat certifikátu, aby záměna certifikátu nezměnila prostředí omylem. */
+    environment: EnvironmentSchema,
   },
   { additionalProperties: false },
 );
@@ -40,6 +46,7 @@ export type ApiErrorType =
   | 'validation'
   | 'no_certificate'
   | 'invalid_certificate'
+  | 'environment_mismatch'
   | 'renewal_unavailable'
   | 'not_found'
   | 'internal';

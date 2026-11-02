@@ -1,5 +1,5 @@
 import type { FastifyPluginAsyncTypebox } from '@fastify/type-provider-typebox';
-import type { RejectedResult } from 'eet2-core';
+import type { RejectedResult } from 'cz-eet2-core';
 import type { AppContext } from '../app.js';
 import { log } from '../logger.js';
 import { apiError, SaleRequestSchema } from '../schemas.js';
@@ -8,7 +8,8 @@ import { apiError, SaleRequestSchema } from '../schemas.js';
  * `POST /api/v1/sales` – podepíše a odešle jednu tržbu (ADR-005, ADR-006).
  *
  * Neplatná data (včetně chybějících položek) vrací HTTP 200 s `result: rejected`, aby je volající
- * neopakoval. HTTP 503 znamená, že chybí platný certifikát – volající má tržbu poslat později.
+ * neopakoval. HTTP 503 znamená, že chybí platný certifikát, HTTP 409, že certifikát je pro jiné prostředí,
+ * než do kterého tržba patří. V obou případech má volající tržbu poslat později.
  */
 export function salesRoute(context: AppContext): FastifyPluginAsyncTypebox {
   return async (fastify) => {
@@ -24,7 +25,8 @@ export function salesRoute(context: AppContext): FastifyPluginAsyncTypebox {
       }
 
       const credentials = context.manager.getCredentials();
-      if (!credentials) {
+      const environment = context.manager.getEnvironment();
+      if (!credentials || !environment) {
         return reply.code(503).send(apiError('no_certificate', 'Není nahrán pokladní certifikát.'));
       }
       const now = context.now().getTime();
@@ -39,11 +41,24 @@ export function salesRoute(context: AppContext): FastifyPluginAsyncTypebox {
           );
       }
 
-      const result = await context.eetClient.sendSale(request.body, credentials);
+      if (request.body.environment !== environment) {
+        log('warn', 'sale_environment_mismatch', { porad_cis: request.body.data.porad_cis, environment: request.body.environment });
+        return reply
+          .code(409)
+          .send(
+            apiError(
+              'environment_mismatch',
+              `Tržba patří do prostředí ${request.body.environment}, nahraný certifikát je pro prostředí ${environment}.`,
+            ),
+          );
+      }
+
+      const result = await context.eetClients[environment].sendSale(request.body, credentials);
       context.activity.record(result, context.now());
 
       const error = result.result === 'rejected' || result.result === 'retry' ? result.error : undefined;
       log(error ? 'warn' : 'info', 'sale_sent', {
+        environment,
         porad_cis: request.body.data.porad_cis,
         celk_trzba: request.body.data.celk_trzba,
         prvni_zaslani: request.body.prvni_zaslani,

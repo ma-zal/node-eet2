@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { CaEetClient, CertificateManager, EetClient, MemoryCertificateStore } from 'eet2-core';
+import { CaEetClient, CertificateManager, EetClient, MemoryCertificateStore, type EetEnvironment } from 'cz-eet2-core';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../src/app.js';
 import { createTestIdentity, readFixture, toLegacyPkcs12 } from '../../core/test/unit/helpers.js';
@@ -11,51 +11,58 @@ const identity = createTestIdentity();
 const p12Base64 = toLegacyPkcs12(identity, PASSWORD).toString('base64');
 
 const sale = {
+  environment: 'playground',
   prvni_zaslani: true,
   data: { id_jednotky: 21, id_pokl: 'POKLADNA1', porad_cis: '162600123', dat_trzby: '2026-10-29T18:20:00Z', celk_trzba: '123.45' },
 };
 
 let now: Date;
 let eetResponses: Array<() => Response>;
-let eetCalls: number;
+let eetCalls: string[];
+/** Prostředí, které testovací certifikát „vydala“ CA EET. */
+let certificateEnvironment: EetEnvironment;
 
-async function createApp(options: { ca?: boolean } = {}): Promise<FastifyInstance> {
-  const manager = new CertificateManager({
-    store: new MemoryCertificateStore(),
-    environment: 'playground',
-    ca: options.ca ? new CaEetClient({ baseUrl: 'https://ca.invalid/api', fetch: async () => new Response(null, { status: 503 }) }) : undefined,
+function createEetClient(environment: EetEnvironment): EetClient {
+  return new EetClient({
+    environment,
     now: () => now,
-    detectEnvironment: () => 'playground',
-  });
-  await manager.load();
-  const eetClient = new EetClient({
-    environment: 'playground',
-    now: () => now,
-    fetch: async () => {
-      eetCalls++;
+    fetch: async (url) => {
+      eetCalls.push(String(url));
       const next = eetResponses.shift();
       if (!next) throw new Error('Test nečekal volání EET.');
       return next();
     },
   });
+}
+
+async function createApp(options: { ca?: boolean } = {}): Promise<FastifyInstance> {
+  const manager = new CertificateManager({
+    store: new MemoryCertificateStore(),
+    ca: options.ca
+      ? { playground: new CaEetClient({ baseUrl: 'https://ca.invalid/api', fetch: async () => new Response(null, { status: 503 }) }) }
+      : undefined,
+    now: () => now,
+    detectEnvironment: () => certificateEnvironment,
+  });
+  await manager.load();
   return buildApp({
-    environment: 'playground',
     manager,
-    eetClient,
+    eetClients: { playground: createEetClient('playground'), production: createEetClient('production') },
     keyEncrypted: false,
     versions: { server_version: '0.1.0', core_version: '0.1.0', git_sha: 'abc123' },
     now: () => now,
   });
 }
 
-async function uploadCertificate(app: FastifyInstance) {
-  return app.inject({ method: 'PUT', url: '/api/v1/certificate', payload: { pkcs12: p12Base64, password: PASSWORD } });
+async function uploadCertificate(app: FastifyInstance, environment: EetEnvironment = 'playground') {
+  return app.inject({ method: 'PUT', url: '/api/v1/certificate', payload: { pkcs12: p12Base64, password: PASSWORD, environment } });
 }
 
 beforeEach(() => {
   now = NOW;
   eetResponses = [];
-  eetCalls = 0;
+  eetCalls = [];
+  certificateEnvironment = 'playground';
 });
 
 describe('bez certifikátu', () => {
@@ -66,10 +73,10 @@ describe('bez certifikátu', () => {
     expect(response.json()).toEqual({ status: 'ok' });
   });
 
-  it('GET /api/v1/status ukazuje prostředí a verze', async () => {
+  it('GET /api/v1/status ukazuje verze, prostředí bez certifikátu není', async () => {
     const app = await createApp();
     expect((await app.inject('/api/v1/status')).json()).toEqual({
-      environment: 'playground',
+      environment: null,
       server_version: '0.1.0',
       core_version: '0.1.0',
       git_sha: 'abc123',
@@ -83,7 +90,7 @@ describe('bez certifikátu', () => {
     const response = await app.inject({ method: 'POST', url: '/api/v1/sales', payload: sale });
     expect(response.statusCode).toBe(503);
     expect(response.json()).toMatchObject({ error: { type: 'no_certificate' } });
-    expect(eetCalls).toBe(0);
+    expect(eetCalls).toEqual([]);
   });
 });
 
@@ -97,21 +104,53 @@ describe('PUT /api/v1/certificate', () => {
       renewal: { state: 'idle', automatic: false },
     });
     expect(response.body).not.toContain('PRIVATE KEY');
-    expect((await app.inject('/api/v1/status')).body).not.toContain('PRIVATE KEY');
+    const status = await app.inject('/api/v1/status');
+    expect(status.body).not.toContain('PRIVATE KEY');
+    expect(status.json()).toMatchObject({ environment: 'playground' });
   });
 
   it('chybné heslo → 400 invalid_certificate', async () => {
     const app = await createApp();
-    const response = await app.inject({ method: 'PUT', url: '/api/v1/certificate', payload: { pkcs12: p12Base64, password: 'spatne11' } });
+    const response = await app.inject({
+      method: 'PUT',
+      url: '/api/v1/certificate',
+      payload: { pkcs12: p12Base64, password: 'spatne11', environment: 'playground' },
+    });
     expect(response.statusCode).toBe(400);
     expect(response.json()).toMatchObject({ error: { type: 'invalid_certificate' } });
   });
 
-  it('chybějící heslo → 400 validation', async () => {
+  it.each([
+    ['heslo', { pkcs12: p12Base64, environment: 'playground' }],
+    ['prostředí', { pkcs12: p12Base64, password: PASSWORD }],
+  ])('chybějící %s → 400 validation', async (_label, payload) => {
     const app = await createApp();
-    const response = await app.inject({ method: 'PUT', url: '/api/v1/certificate', payload: { pkcs12: p12Base64 } });
+    const response = await app.inject({ method: 'PUT', url: '/api/v1/certificate', payload });
     expect(response.statusCode).toBe(400);
     expect(response.json()).toMatchObject({ error: { type: 'validation' } });
+  });
+
+  it('zvolené prostředí neodpovídá certifikátu → 400 invalid_certificate, nic se nezmění', async () => {
+    const app = await createApp();
+    await uploadCertificate(app);
+    const response = await uploadCertificate(app, 'production');
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({
+      error: { type: 'invalid_certificate', message: 'Certifikát je vydán pro prostředí playground, ne pro zvolené prostředí production.' },
+    });
+    expect((await app.inject('/api/v1/status')).json()).toMatchObject({ environment: 'playground' });
+  });
+
+  it('certifikát jiného prostředí prostředí přepne, tržby pak jdou do něj', async () => {
+    const app = await createApp();
+    await uploadCertificate(app);
+    certificateEnvironment = 'production';
+    expect((await uploadCertificate(app, 'production')).statusCode).toBe(200);
+    expect((await app.inject('/api/v1/status')).json()).toMatchObject({ environment: 'production' });
+
+    eetResponses.push(() => new Response('<html>Bad gateway</html>', { status: 502 }));
+    await app.inject({ method: 'POST', url: '/api/v1/sales', payload: { ...sale, environment: 'production' } });
+    expect(eetCalls).toEqual(['https://trzbyeet.gov.cz/eet/services/EETServiceSOAP/v4']);
   });
 });
 
@@ -146,10 +185,25 @@ describe('POST /api/v1/sales', () => {
     });
   });
 
+  it('tržba pro jiné prostředí, než je certifikát → 409 environment_mismatch, nic se neodešle', async () => {
+    const app = await createApp();
+    await uploadCertificate(app);
+    const response = await app.inject({ method: 'POST', url: '/api/v1/sales', payload: { ...sale, environment: 'production' } });
+    expect(response.statusCode).toBe(409);
+    expect(response.json()).toEqual({
+      error: {
+        type: 'environment_mismatch',
+        message: 'Tržba patří do prostředí production, nahraný certifikát je pro prostředí playground.',
+      },
+    });
+    expect(eetCalls).toEqual([]);
+  });
+
   it.each([
-    ['chybějící položka', { prvni_zaslani: true, data: { ...sale.data, celk_trzba: undefined } }],
+    ['chybějící položka', { ...sale, data: { ...sale.data, celk_trzba: undefined } }],
+    ['chybějící prostředí', { prvni_zaslani: true, data: sale.data }],
     ['neznámá položka', { ...sale, data: { ...sale.data, dic_popl: 'CZ1' } }],
-    ['chybějící prvni_zaslani', { data: sale.data }],
+    ['chybějící prvni_zaslani', { environment: 'playground', data: sale.data }],
     ['neplatný formát částky', { ...sale, data: { ...sale.data, celk_trzba: '1.0' } }],
   ])('neplatná data (%s) → HTTP 200 rejected validation, nic se neodešle', async (_label, payload) => {
     const app = await createApp();
@@ -157,7 +211,7 @@ describe('POST /api/v1/sales', () => {
     const response = await app.inject({ method: 'POST', url: '/api/v1/sales', payload });
     expect(response.statusCode).toBe(200);
     expect(response.json()).toMatchObject({ result: 'rejected', error: { type: 'validation' } });
-    expect(eetCalls).toBe(0);
+    expect(eetCalls).toEqual([]);
   });
 
   it('prošlý certifikát → 503 a /healthy hlásí chybu', async () => {

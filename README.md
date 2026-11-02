@@ -8,7 +8,7 @@ Open-source klient pro **EET 2.0** (elektronická evidence tržeb v ČR, ostrý 
 
 | Balíček | Popis | Distribuce |
 |---|---|---|
-| `eet2-core` | Knihovna: sestavení, podpis a odeslání datové zprávy o tržbě, klasifikace výsledku, načtení pokladního certifikátu (`.p12`), klient CA EET pro automatickou obnovu certifikátu. | npm |
+| `eet2-core` | Knihovna: sestavení, podpis a odeslání datové zprávy o tržbě, klasifikace výsledku, načtení pokladního certifikátu (`.p12`), klient CA EET pro automatickou obnovu certifikátu. | npm balíček `cz-eet2-core` |
 | `eet2-server` | HTTP služba nad `eet2-core`. Drží pokladní certifikát, sama ho před vypršením obnovuje a nabízí jednoduché JSON API pro odeslání tržby. | Docker image `ghcr.io/ma-zal/eet2-server` |
 
 eet2 tržbu podepíše, odešle a vrátí výsledek. **Frontu tržeb, opakování odeslání a hlídání 48hodinové lhůty řeší pokladní systém**, protože tržba musí vzniknout atomicky spolu s účtenkou (viz ADR-001).
@@ -29,9 +29,9 @@ services:
     # bez publikovaného portu – volá ho jen pokladní systém ve stejné síti (ADR-009)
 ```
 
-1. Adresář `./storage-eet2` musí existovat. Při prvním startu se v něm založí `config.cjs` a služba skončí chybou, dokud v něm nenastavíte `environment` (`'playground'` nebo `'production'`).
-2. Nahrajte pokladní certifikát z DIS+: `PUT /api/v1/certificate` s `{ "pkcs12": "<.p12 v base64>", "password": "…" }`.
-3. Odesílejte tržby: `POST /api/v1/sales`.
+1. Adresář `./storage-eet2` musí existovat. Při prvním startu se v něm založí `config.cjs` s výchozími hodnotami.
+2. Nahrajte pokladní certifikát: `PUT /api/v1/certificate` s `{ "pkcs12": "<.p12 v base64>", "password": "…", "environment": "production" }`. Prostředí EET (playground / produkce) určuje certifikát podle CA EET, která ho vydala. `environment` je pojistka: musí certifikátu odpovídat, jinak se nahrání odmítne (ADR-007).
+3. Odesílejte tržby: `POST /api/v1/sales`. Každá tržba uvádí `environment`, do kterého patří; pokud neodpovídá certifikátu, eet2 ji neodešle (HTTP 409).
 
 ### API
 
@@ -48,6 +48,7 @@ POST /api/v1/sales
 Content-Type: application/json
 
 {
+  "environment": "production",
   "prvni_zaslani": true,
   "data": {
     "id_jednotky": 181,
@@ -68,19 +69,17 @@ npm install
 npm run test:playground     # mimo jiné stáhne oficiální testovací certifikáty do .fixtures/playground/
 
 mkdir -p .storage
-npm run build && npm start  # první start založí .storage/config.cjs a skončí chybou
-# v .storage/config.cjs nastavit environment: 'playground'
-npm start                   # nebo `npm run dev` (watch režim nad zdrojáky, bez buildu)
+npm run build && npm start  # nebo `npm run dev` (watch režim nad zdrojáky, bez buildu)
 
 # nahrání testovacího certifikátu
 P12=$(base64 -i .fixtures/playground/CA_EET-Playground-CZ683555118.p12 | tr -d '\n')
 PASS=$(tr -d '\r\n' < .fixtures/playground/password_pokladni_cert_playground.txt)
 curl -X PUT localhost:3000/api/v1/certificate -H 'Content-Type: application/json' \
-  -d "{\"pkcs12\":\"$P12\",\"password\":\"$PASS\"}"
+  -d "{\"pkcs12\":\"$P12\",\"password\":\"$PASS\",\"environment\":\"playground\"}"
 
 # odeslání tržby
 curl -X POST localhost:3000/api/v1/sales -H 'Content-Type: application/json' \
-  -d "{\"prvni_zaslani\":true,\"data\":{\"id_jednotky\":21,\"id_pokl\":\"TEST1\",\"porad_cis\":\"T$(date +%s)\",\"dat_trzby\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"celk_trzba\":\"350.00\"}}"
+  -d "{\"environment\":\"playground\",\"prvni_zaslani\":true,\"data\":{\"id_jednotky\":21,\"id_pokl\":\"TEST1\",\"porad_cis\":\"T$(date +%s)\",\"dat_trzby\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\",\"celk_trzba\":\"350.00\"}}"
 
 curl localhost:3000/api/v1/status
 ```

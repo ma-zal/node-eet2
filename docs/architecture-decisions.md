@@ -48,7 +48,7 @@ node-eet2/
 ├── tsconfig.base.json        # ESM, NodeNext, strict
 ├── Dockerfile                # image serveru; build context = root (potřebuje core i server)
 ├── packages/
-│   ├── core/                 # npm balíček eet2-core, ESM + typy
+│   ├── core/                 # eet2-core, npm balíček cz-eet2-core, ESM + typy
 │   │   ├── src/
 │   │   │   ├── sale/         # model <Trzba>, validace a formátování dle XSD
 │   │   │   ├── soap/         # obálka, WS-Security podpis, parsování a ověření odpovědi
@@ -96,18 +96,18 @@ Core je knihovna na npm, server je Docker image, který core obsahuje. Změna v 
 
 ### Rozhodnutí
 
-- Oba balíčky mají vlastní semver: `eet2-core` (veřejný, npm) a `eet2-server` (`private: true`, jen Docker image).
-- Tagy ve formátu Changesets: `eet2-core@X.Y.Z`, `eet2-server@X.Y.Z`.
+- Oba balíčky mají vlastní semver: `eet2-core` (veřejný, na npm jako `cz-eet2-core`) a `eet2-server` (`private: true`, jen Docker image).
+- Tagy ve formátu Changesets: `cz-eet2-core@X.Y.Z`, `eet2-server@X.Y.Z`.
 - `.changeset/config.json`:
   - `privatePackages: { version: true, tag: true }`: server se verzuje a taguje, i když se nepublikuje na npm.
-- Server závisí na core **přesnou verzí** (`"eet2-core": "1.0.0"`, ne `^1.0.0`). Každé vydání core je tak mimo rozsah serveru a Changesets serveru samy zvednou patch verzi a závislost. Volba `updateInternalDependencies` to v Changesets 3 nezajistí, ta upravuje jen balíčky ze stejného vydání. Experimentální `updateInternalDependents: "always"` má v názvu varování, že se může změnit i v patch verzi. Přesná verze navíc odpovídá skutečnosti, protože image obsahuje právě tuto verzi core.
+- Server závisí na core **přesnou verzí** (`"cz-eet2-core": "1.0.0"`, ne `^1.0.0`). Každé vydání core je tak mimo rozsah serveru a Changesets serveru samy zvednou patch verzi a závislost. Volba `updateInternalDependencies` to v Changesets 3 nezajistí, ta upravuje jen balíčky ze stejného vydání. Experimentální `updateInternalDependents: "always"` má v názvu varování, že se může změnit i v patch verzi. Přesná verze navíc odpovídá skutečnosti, protože image obsahuje právě tuto verzi core.
 - Výsledek:
   - změna jen v serveru = release jen serveru,
   - změna v core = release core a automaticky i serveru.
 - Průběh:
   1. Ke každé změně s dopadem na uživatele se přidá changeset (`npx changeset`).
   2. `changesets/action` na `master` otevře nebo aktualizuje PR „Version Packages“ (verze, `CHANGELOG.md` pro každý balíček).
-  3. Merge tohoto PR spustí `changeset publish`: publikuje `eet2-core` na npm a vytvoří tagy.
+  3. Merge tohoto PR spustí `changeset publish`: publikuje `cz-eet2-core` na npm a vytvoří tagy.
   4. Docker build běží ve stejném `release.yml` podle výstupu `publishedPackages` (pokud obsahuje `eet2-server`). Tagy vytvořené přes `GITHUB_TOKEN` by samostatný workflow na tag nespustily.
 - Image `ghcr.io/ma-zal/eet2-server` (explicitně, ne výchozí název podle repozitáře). Tagy `X.Y.Z`, `X.Y`, `X`, `latest`. Multi-arch `linux/amd64` + `linux/arm64` (Raspberry Pi).
 - Zveřejňuje se jen ověřený build:
@@ -134,6 +134,7 @@ Core je knihovna na npm, server je Docker image, který core obsahuje. Změna v 
 - Třídy, funkce a options v TypeScriptu podle konvencí TS (`EetClient.sendSale()`, `SaleData`, `SendResult`, `CaEetClient`, `CertificateManager`, `CertificateStore`).
 - `config.cjs` serveru v `camelCase`.
 - Oficiální anglický název EET je „Electronic Registration of Sales“, proto `sale` / `sales` pro tržbu.
+- Knihovna se jmenuje `eet2-core`, na npm `cz-eet2-core`. Jmenný prostor npm je globální a EET existuje jen v ČR, předpona `cz-` to v názvu říká. Název z npm je v `package.json`, a proto i v importech, v závislosti serveru a v tagech vydání.
 
 | Oblast | Oficiální názvy (beze změny) | Naše názvy (anglicky) |
 |---|---|---|
@@ -150,8 +151,8 @@ Core je knihovna na npm, server je Docker image, který core obsahuje. Změna v 
 | Endpoint | Účel |
 |---|---|
 | `POST /api/v1/sales` | podepíše a odešle jednu tržbu, výsledek vrátí synchronně |
-| `GET /api/v1/status` | certifikát, stav obnovy, poslední úspěch a chyba, verze |
-| `PUT /api/v1/certificate` | nahrání `.p12` a hesla (ADR-007) |
+| `GET /api/v1/status` | prostředí, certifikát, stav obnovy, poslední úspěch a chyba, verze |
+| `PUT /api/v1/certificate` | nahrání `.p12` a hesla, nastaví prostředí (ADR-007) |
 | `POST /api/v1/certificate/renew` | ruční spuštění obnovy (ADR-008) |
 | `GET /healthy` | Docker healthcheck |
 
@@ -159,6 +160,7 @@ Core je knihovna na npm, server je Docker image, který core obsahuje. Změna v 
 
 ```jsonc
 {
+  "environment": "production",   // povinné; prostředí, do kterého tržba patří – musí odpovídat certifikátu
   "prvni_zaslani": true,         // povinné; určuje volající podle počtu pokusů
   "overeni": false,              // volitelné; true = ověřovací mód (test spojení, nic se neeviduje)
   "data": {                      // 1:1 s XSD <Data>
@@ -179,7 +181,8 @@ Core je knihovna na npm, server je Docker image, který core obsahuje. Změna v 
 - eet2 převede `dat_trzby` a `dat_odesl` na lokální čas Europe/Prague s offsetem (`+01:00` / `+02:00`) bez milisekund.
 - Částky jsou stringy, aby nevznikaly chyby zaokrouhlení. eet2 validuje formát podle XSD (žádné vedoucí nuly, zakázané `-0.00`, absolutní hodnota pod 100 mil.).
 - Zpráva se před odesláním kontroluje na limit 12 kB včetně SOAP obálky.
-- HTTP: `POST` na endpoint prostředí, HTTP/1.1, TLS ≥ 1.2 s ověřením certifikátu serveru, `Content-Type: text/xml; charset=utf-8`, `SOAPAction: "http://fs.gov.cz/eet/OdeslaniTrzby"`.
+- `environment` chrání před odesláním tržby do jiného prostředí po výměně certifikátu: tržba vzniklá v playground se po přechodu na produkci neodešle naostro. Volající uvádí prostředí platné v okamžiku tržby (ADR-007).
+- HTTP: `POST` na endpoint prostředí certifikátu, HTTP/1.1, TLS ≥ 1.2 s ověřením certifikátu serveru, `Content-Type: text/xml; charset=utf-8`, `SOAPAction: "http://fs.gov.cz/eet/OdeslaniTrzby"`.
 
 ### Odpověď
 
@@ -211,7 +214,8 @@ Pokud eet2 požadavek zpracuje, vrací vždy HTTP 200 s polem `result`:
 - Pole bez hodnoty se ve výsledku vynechávají (např. `error.kod` mimo `type: eet`, `signature_error` při platném podpisu).
 - Při neplatných vstupních datech se nic neodesílá: HTTP 200, `result: rejected`, `error.type: validation`, bez `uuid_zpravy`. Platí i pro chybějící nebo neznámé položky požadavku, aby je volající neopakoval.
 - `503` s tělem `{ "error": { "type": "no_certificate", "message": "…" } }`: eet2 nemá platný certifikát (žádný, prošlý nebo ještě neplatný).
-- Pravidlo pro volajícího: HTTP 200 → řídit se podle `result`. Cokoli jiného (spojení odmítnuto, timeout volání, 5xx včetně 503) → stejně jako `retry`.
+- `409` s `error.type: environment_mismatch`: tržba patří do jiného prostředí, než pro které je nahraný certifikát. Nic se neodešle.
+- Pravidlo pro volajícího: HTTP 200 → řídit se podle `result`. Cokoli jiného (spojení odmítnuto, timeout volání, 409, 5xx včetně 503) → stejně jako `retry`. Tržby prostředí, do kterého se už nevrátí, musí volající sám vyřadit.
 
 ### Chyby ostatních endpointů
 
@@ -220,7 +224,7 @@ Tělo `{ "error": { "type": "…", "message": "…" } }`, zpráva je česky:
 | HTTP | `type` | Kdy |
 |---|---|---|
 | 400 | `validation` | neplatný požadavek (chybějící nebo neznámé položky) |
-| 400 | `invalid_certificate` | `.p12` nelze načíst, chybné heslo, certifikát z jiného prostředí nebo neplatný |
+| 400 | `invalid_certificate` | `.p12` nelze načíst, chybné heslo, certifikát z jiného než zvoleného prostředí nebo neplatný |
 | 409 | `renewal_unavailable` | ruční obnova bez CA EET API nebo po vypršení certifikátu |
 | 409 | `no_certificate` | ruční obnova bez nahraného certifikátu |
 | 404 | `not_found` | neznámý endpoint |
@@ -228,14 +232,14 @@ Tělo `{ "error": { "type": "…", "message": "…" } }`, zpráva je česky:
 
 ### `PUT /api/v1/certificate` a `POST /api/v1/certificate/renew`
 
-- Nahrání vrací HTTP 200 se stavem certifikátu (`certificate` a `renewal` jako v `GET /api/v1/status`).
+- Nahrání vrací HTTP 200 se stavem certifikátu (`environment`, `certificate` a `renewal` jako v `GET /api/v1/status`).
 - Ruční obnova vrací HTTP 202 a běží na pozadí, protože čekání na CA může trvat minuty. Průběh je vidět v `GET /api/v1/status`.
 
 ### `GET /api/v1/status`
 
 ```jsonc
 {
-  "environment": "playground",          // playground | production
+  "environment": "playground",          // playground | production podle nahraného certifikátu; bez certifikátu null
   "server_version": "1.0.0", "core_version": "1.0.0", "git_sha": "…",
   "key_encrypted": false,               // ukládá se privátní klíč šifrovaně (EET2_KEY_PASSPHRASE)
   "certificate": {                      // chybí, pokud není nahrán
@@ -245,7 +249,7 @@ Tělo `{ "error": { "type": "…", "message": "…" } }`, zpráva je česky:
   },
   "renewal": {
     "state": "scheduled",               // idle | scheduled | in_progress | failed | expired (ADR-008)
-    "automatic": true,                  // je nakonfigurované CA EET API
+    "automatic": true,                  // je nakonfigurované CA EET API pro prostředí certifikátu
     "scheduled_at": "…", "next_attempt_at": "…",
     "req_id": "…", "ca_state": "INPROCESS",
     "last_error": { "at": "…", "message": "…" }
@@ -290,11 +294,14 @@ Tělo `{ "error": { "type": "…", "message": "…" } }`, zpráva je česky:
 ### Rozhodnutí
 
 - Certifikát je v úložišti eet2-serveru `.storage/` (Docker volume), ne v databázi pokladního systému. Privátní klíč neopouští kontejner eet2.
-- **Nahrání** (`PUT /api/v1/certificate`, tělo `{ "pkcs12": "<base64>", "password": "…" }`):
+- **Prostředí EET** (playground / produkce) určuje aktuální certifikát podle CA EET, která ho vydala. Neukládá se zvlášť a není v konfiguraci, po startu se odvodí z uloženého certifikátu. Podle něj se volí endpoint EET a CA EET API pro obnovu. Bez certifikátu prostředí není.
+- **Nahrání** (`PUT /api/v1/certificate`, tělo `{ "pkcs12": "<base64>", "password": "…", "environment": "production" }`):
   1. Načtení `.p12` včetně legacy 3DES (pure-JS parser, např. node-forge, bez závislosti na OpenSSL legacy provideru).
-  2. Kontroly: právě jeden privátní klíč a jeden koncový certifikát; klíč patří k certifikátu; certifikát je právě platný; vydavatel odpovídá CA EET **nakonfigurovaného prostředí** (playground certifikát v produkci se odmítne); CN má tvar EIČ (`CZ[0-9]{8,10}`).
+  2. Kontroly: právě jeden privátní klíč a jeden koncový certifikát; klíč patří k certifikátu; certifikát je právě platný; vydavatel odpovídá CA EET **zvoleného prostředí** `environment`; CN má tvar EIČ (`CZ[0-9]{8,10}`).
   3. Při chybě se nic nemění a vrátí se `400` s českou zprávou.
-  4. Při úspěchu se nový certifikát stane aktuálním. Dosavadní se přesune do `previous` jen pro historii, k podpisu se nepoužívá.
+  4. Při úspěchu se nový certifikát stane aktuálním a prostředí služby se nastaví podle něj, i když bylo dosud jiné. Dosavadní certifikát se přesune do `previous` jen pro historii, k podpisu se nepoužívá.
+- **Proč explicitní `environment`, když ho určuje certifikát:** záměna souboru (testovací certifikát místo produkčního nebo naopak) by jinak tiše přepnula prostředí. Omylem nasazený playground přitom vypadá funkčně, jen se tržby neevidují. Správce volbou potvrzuje, že ví, do kterého prostředí certifikát nahrává.
+- Tržby nesou prostředí, do kterého patří (ADR-005), a eet2 je při nesouladu s certifikátem neodešle. Neodeslané tržby předchozího prostředí po přepnutí vyřadí volající, eet2 frontu nemá (ADR-001).
 - Heslo k `.p12` se neukládá. Po načtení se klíč a certifikát uloží v PEM.
 - Správu certifikátu včetně obnovy dělá `CertificateManager` z core. Stav ukládá jako jeden dokument `CertificateState` přes rozhraní `CertificateStore`; server ho ukládá do souboru `.storage/certificate.json`, embedder si může dodat vlastní úložiště. Obsah:
   - `version`,
@@ -309,15 +316,15 @@ Tělo `{ "error": { "type": "…", "message": "…" } }`, zpráva je česky:
 
 ```js
 module.exports = {
-  environment: 'playground',   // povinné: 'playground' | 'production' – určuje endpoint EET, CA API a očekávanou CA
   requestTimeoutMs: 5000,      // mezní doba odezvy, minimum 2000
   renewBeforeDays: 21,         // kdy začít obnovu před koncem platnosti
-  // eetUrl: '…',              // přepis adresy EET (vývoj)
-  // caApiUrl: '…' | null,     // přepis adresy CA EET API; null = automatickou obnovu vypnout
+  // eetUrl: '…',              // přepis adresy EET pro obě prostředí (vývoj)
+  // caApiUrl: '…' | null,     // přepis adresy CA EET API pro obě prostředí; null = automatickou obnovu vypnout
 };
 ```
 
-- Načítání a validace jako teya ADR-002: chybějící `.storage/` znamená fail-fast (nepřipojený volume). Chybějící `config.cjs` se založí ze šablony s prázdným `environment`, která neprojde validací. Prostředí se tak musí zvolit vědomě – omylem nasazený playground by vypadal funkčně, ale tržby by se neevidovaly.
+- Prostředí EET v konfiguraci není, určuje ho nahraný certifikát (viz výše).
+- Načítání a validace jako teya ADR-002: chybějící `.storage/` znamená fail-fast (nepřipojený volume). Chybějící `config.cjs` se založí ze šablony s výchozími hodnotami.
 - Neznámé položky konfigurace jsou chyba (překlep se neztratí).
 - Výchozí CA EET API: produkce `https://ca.caeet.gov.cz/api`, playground žádné.
 

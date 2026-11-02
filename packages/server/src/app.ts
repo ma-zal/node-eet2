@@ -1,6 +1,6 @@
 import Fastify, { type FastifyError, type FastifyInstance } from 'fastify';
 import { TypeBoxValidatorCompiler, type TypeBoxTypeProvider } from '@fastify/type-provider-typebox';
-import type { CertificateManager, EetClient, EetEnvironment, SendResult } from 'eet2-core';
+import type { CertificateManager, EetClient, EetEnvironment, SendResult } from 'cz-eet2-core';
 import { log } from './logger.js';
 import { certificateRoutes } from './routes/certificate.js';
 import { healthyRoute } from './routes/healthy.js';
@@ -10,9 +10,9 @@ import { apiError } from './schemas.js';
 import type { Versions } from './versions.js';
 
 export interface AppContext {
-  environment: EetEnvironment;
   manager: CertificateManager;
-  eetClient: EetClient;
+  /** Klient EET pro každé prostředí; použije se ten podle prostředí certifikátu. */
+  eetClients: Record<EetEnvironment, EetClient>;
   /** Ukládají se privátní klíče šifrovaně (`EET2_KEY_PASSPHRASE`). */
   keyEncrypted: boolean;
   versions: Versions;

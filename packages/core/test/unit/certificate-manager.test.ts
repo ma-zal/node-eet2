@@ -75,8 +75,7 @@ let sleeps: number[];
 function createManager(overrides: Partial<CertificateManagerOptions> = {}): CertificateManager {
   return new CertificateManager({
     store,
-    environment: 'playground',
-    ca,
+    ca: { playground: ca },
     now: () => now,
     sleep: async (ms) => {
       sleeps.push(ms);
@@ -90,7 +89,7 @@ async function managerWithOriginal(): Promise<CertificateManager> {
   now = new Date('2026-06-01T00:00:00Z');
   const manager = createManager();
   await manager.load();
-  await manager.installPkcs12(toLegacyPkcs12(original, PASSWORD), PASSWORD);
+  await manager.installPkcs12(toLegacyPkcs12(original, PASSWORD), PASSWORD, 'playground');
   return manager;
 }
 
@@ -105,6 +104,7 @@ describe('CertificateManager – nahrání certifikátu', () => {
   it('nahraje certifikát a naplánuje obnovu 21 dní před koncem platnosti', async () => {
     const manager = await managerWithOriginal();
     expect(manager.getStatus()).toEqual({
+      environment: 'playground',
       certificate: {
         eic: 'CZ00000019',
         serial_number: original.credentials.serial_number,
@@ -124,31 +124,58 @@ describe('CertificateManager – nahrání certifikátu', () => {
     now = new Date('2026-06-01T00:00:00Z');
     const manager = createManager({ detectEnvironment: () => 'production' });
     await manager.load();
-    await expect(manager.installPkcs12(toLegacyPkcs12(original, PASSWORD), PASSWORD)).rejects.toThrow(
-      'Certifikát je vydán pro prostředí produkce, služba běží v prostředí playground.',
+    await expect(manager.installPkcs12(toLegacyPkcs12(original, PASSWORD), PASSWORD, 'playground')).rejects.toThrow(
+      'Certifikát je vydán pro prostředí production, ne pro zvolené prostředí playground.',
     );
+    expect(manager.getEnvironment()).toBeUndefined();
+  });
+
+  it('nahrání certifikátu z jiného prostředí přepne prostředí i automatickou obnovu', async () => {
+    now = new Date('2026-06-01T00:00:00Z');
+    const isRenewed = (credentials: EetCredentials) => credentials.serial_number === renewed.credentials.serial_number;
+    const manager = createManager({ detectEnvironment: (credentials) => (isRenewed(credentials) ? 'production' : 'playground') });
+    await manager.load();
+    expect(manager.getEnvironment()).toBeUndefined();
+    await manager.installPkcs12(toLegacyPkcs12(original, PASSWORD), PASSWORD, 'playground');
+    expect(manager.getEnvironment()).toBe('playground');
+    expect(manager.getStatus().renewal.automatic).toBe(true);
+
+    now = new Date('2026-12-20T00:00:00Z');
+    await manager.installPkcs12(toLegacyPkcs12(renewed, PASSWORD), PASSWORD, 'production');
+    expect(manager.getEnvironment()).toBe('production');
+    expect(manager.getStatus().environment).toBe('production');
+    // CA EET API je v testu jen pro playground
+    expect(manager.getStatus().renewal.automatic).toBe(false);
+  });
+
+  it('po načtení z úložiště zná prostředí uloženého certifikátu', async () => {
+    await managerWithOriginal();
+    const reloaded = createManager();
+    await reloaded.load();
+    expect(reloaded.getEnvironment()).toBe('playground');
+    expect(reloaded.getStatus().environment).toBe('playground');
   });
 
   it('odmítne certifikát, který nevydala CA EET', async () => {
     now = new Date('2026-06-01T00:00:00Z');
     const manager = createManager({ detectEnvironment: undefined });
     await manager.load();
-    await expect(manager.installPkcs12(toLegacyPkcs12(original, PASSWORD), PASSWORD)).rejects.toThrow(EetCertificateError);
+    await expect(manager.installPkcs12(toLegacyPkcs12(original, PASSWORD), PASSWORD, 'playground')).rejects.toThrow(EetCertificateError);
   });
 
   it('odmítne certifikát mimo dobu platnosti a chybné heslo', async () => {
     now = new Date('2027-02-01T00:00:00Z');
     const manager = createManager();
     await manager.load();
-    await expect(manager.installPkcs12(toLegacyPkcs12(original, PASSWORD), PASSWORD)).rejects.toThrow(/není platný/);
-    await expect(manager.installPkcs12(toLegacyPkcs12(renewed, PASSWORD), 'spatne11')).rejects.toThrow(EetCertificateError);
+    await expect(manager.installPkcs12(toLegacyPkcs12(original, PASSWORD), PASSWORD, 'playground')).rejects.toThrow(/není platný/);
+    await expect(manager.installPkcs12(toLegacyPkcs12(renewed, PASSWORD), 'spatne11', 'playground')).rejects.toThrow(EetCertificateError);
     expect(manager.getStatus().certificate).toBeUndefined();
   });
 
   it('nové nahrání přesune dosavadní certifikát do previous', async () => {
     const manager = await managerWithOriginal();
     now = new Date('2026-12-20T00:00:00Z');
-    await manager.installPkcs12(toLegacyPkcs12(renewed, PASSWORD), PASSWORD);
+    await manager.installPkcs12(toLegacyPkcs12(renewed, PASSWORD), PASSWORD, 'playground');
     const state = await store.load();
     expect(state?.current?.serial_number).toBe(renewed.credentials.serial_number);
     expect(state?.previous?.serial_number).toBe(original.credentials.serial_number);
@@ -309,7 +336,7 @@ describe('CertificateManager – automatická obnova', () => {
     now = new Date('2026-06-01T00:00:00Z');
     const manager = createManager({ ca: undefined });
     await manager.load();
-    await manager.installPkcs12(toLegacyPkcs12(original, PASSWORD), PASSWORD);
+    await manager.installPkcs12(toLegacyPkcs12(original, PASSWORD), PASSWORD, 'playground');
     now = new Date('2026-12-20T00:00:00Z');
     expect((await manager.checkRenewal()).renewal).toEqual({ state: 'idle', automatic: false });
     await expect(manager.renewNow()).rejects.toThrow(/není k dispozici/);

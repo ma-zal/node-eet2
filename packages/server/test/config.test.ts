@@ -17,33 +17,34 @@ describe('loadConfig', () => {
     expect(() => loadConfig(path.join(tempDir(), 'neexistuje'))).toThrow(/není připojený volume/);
   });
 
-  it('chybějící config.cjs se založí ze šablony, která bez environment neprojde', () => {
+  it('chybějící config.cjs se založí ze šablony s výchozími hodnotami', () => {
     const dir = tempDir();
-    expect(() => loadConfig(dir)).toThrow(/nastavte 'playground' nebo 'production'/);
+    expect(loadConfig(dir)).toEqual({ requestTimeoutMs: 5000, renewBeforeDays: 21 });
     expect(existsSync(path.join(dir, 'config.cjs'))).toBe(true);
   });
 
   it('načte platnou konfiguraci', () => {
     const dir = tempDir();
-    writeConfig(dir, "module.exports = { environment: 'production', requestTimeoutMs: 3000 };");
-    expect(loadConfig(dir)).toEqual({ environment: 'production', requestTimeoutMs: 3000 });
+    writeConfig(dir, 'module.exports = { requestTimeoutMs: 3000 };');
+    expect(loadConfig(dir)).toEqual({ requestTimeoutMs: 3000 });
   });
 
-  it('odmítne neznámé položky a příliš krátký timeout', () => {
+  it('odmítne neznámé položky (i dřívější environment) a příliš krátký timeout', () => {
     const dir = tempDir();
-    writeConfig(dir, "module.exports = { environment: 'playground', requestTimeoutMs: 500, enviroment: 'x' };");
+    writeConfig(dir, "module.exports = { environment: 'playground', requestTimeoutMs: 500 };");
     expect(() => loadConfig(dir)).toThrow(/requestTimeoutMs/);
+    expect(() => loadConfig(dir)).toThrow(/environment/);
   });
 });
 
 describe('resolveCaApiUrl', () => {
   it('produkce má výchozí CA EET API, playground žádné', () => {
-    expect(resolveCaApiUrl({ environment: 'production' })).toBe('https://ca.caeet.gov.cz/api');
-    expect(resolveCaApiUrl({ environment: 'playground' })).toBeUndefined();
+    expect(resolveCaApiUrl({}, 'production')).toBe('https://ca.caeet.gov.cz/api');
+    expect(resolveCaApiUrl({}, 'playground')).toBeUndefined();
   });
 
   it('caApiUrl přepíše výchozí adresu, null obnovu vypne', () => {
-    expect(resolveCaApiUrl({ environment: 'playground', caApiUrl: 'https://ca.test.caeet.gov.cz/api' })).toBe('https://ca.test.caeet.gov.cz/api');
-    expect(resolveCaApiUrl({ environment: 'production', caApiUrl: null })).toBeUndefined();
+    expect(resolveCaApiUrl({ caApiUrl: 'https://ca.test.caeet.gov.cz/api' }, 'playground')).toBe('https://ca.test.caeet.gov.cz/api');
+    expect(resolveCaApiUrl({ caApiUrl: null }, 'production')).toBeUndefined();
   });
 });

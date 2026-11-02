@@ -1,5 +1,5 @@
 {
-  "name": "eet2-core",
+  "name": "cz-eet2-core",
   "version": "0.1.0",
   "description": "Klient pro EET 2.0 (elektronická evidence tržeb v ČR): podpis a odeslání datové zprávy o tržbě, pokladní certifikát.",
   "license": "MIT",

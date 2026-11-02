@@ -2,7 +2,7 @@
 
 ## Účel projektu
 
-Open-source implementace EET 2.0 (elektronická evidence tržeb v ČR, ostrý provoz od 1. 1. 2027) pro Node.js. Repozitář obsahuje knihovnu `eet2-core` a HTTP službu `eet2-server`. Primárním uživatelem je pokladní systém zebra-pos, řešení je ale obecné.
+Open-source implementace EET 2.0 (elektronická evidence tržeb v ČR, ostrý provoz od 1. 1. 2027) pro Node.js. Repozitář obsahuje knihovnu `eet2-core` (v npm jako `cz-eet2-core`) a HTTP službu `eet2-server`. Primárním uživatelem je pokladní systém zebra-pos, řešení je ale obecné.
 
 Architektonická rozhodnutí jsou v [docs/architecture-decisions.md](docs/architecture-decisions.md). Nové zásadní rozhodnutí = nové ADR v tomto souboru.
 
@@ -19,7 +19,7 @@ Architektonická rozhodnutí jsou v [docs/architecture-decisions.md](docs/archit
 ```
 node-eet2/
 ├── packages/
-│   ├── core/      # npm balíček eet2-core
+│   ├── core/      # eet2-core, npm balíček cz-eet2-core
 │   └── server/    # eet2-server, publikuje se jen jako Docker image
 ├── docs/          # ADR
 ├── .changeset/    # Changesets: config.json a čekající záznamy změn

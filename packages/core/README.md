@@ -1,4 +1,4 @@
-# eet2-core
+# cz-eet2-core
 
 Knihovna pro **EET 2.0** (elektronická evidence tržeb v ČR): sestavení, podpis a odeslání datové zprávy o tržbě, klasifikace výsledku a načtení pokladního certifikátu.
 
@@ -8,7 +8,7 @@ Knihovna pro **EET 2.0** (elektronická evidence tržeb v ČR): sestavení, podp
 
 ```ts
 import { readFileSync } from 'node:fs';
-import { EetClient, loadPkcs12 } from 'eet2-core';
+import { EetClient, loadPkcs12 } from 'cz-eet2-core';
 
 // .p12 a heslo z aplikace Správa pokladních certifikátů EET v DIS+ (legacy 3DES formát je podporovaný)
 const credentials = loadPkcs12(readFileSync('pokladni-certifikat.p12'), 'ABcd1234');
@@ -44,7 +44,7 @@ Názvy položek dat (`id_jednotky`, `porad_cis`, `celk_trzba`, …) jsou převza
 ## Správa certifikátu a automatická obnova
 
 ```ts
-import { CA_EET_API_URLS, CaEetClient, CertificateManager } from 'eet2-core';
+import { CA_EET_API_URLS, CaEetClient, CertificateManager } from 'cz-eet2-core';
 
 const manager = new CertificateManager({
   store: myStore, // vlastní CertificateStore (load/save) – stav obsahuje privátní klíč, chraňte ho
