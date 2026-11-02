@@ -1,5 +1,5 @@
 import type { FastifyPluginAsyncTypebox } from '@fastify/type-provider-typebox';
-import type { RejectedResult } from 'cz-eet2-core';
+import type { RejectedResult } from 'eet2-core';
 import type { AppContext } from '../app.js';
 import { log } from '../logger.js';
 import { apiError, SaleRequestSchema } from '../schemas.js';

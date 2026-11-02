@@ -1,6 +1,6 @@
 import { createPrivateKey } from 'node:crypto';
 import { readFile, rename, writeFile } from 'node:fs/promises';
-import type { CertificateState, CertificateStore, StoredCertificate } from 'cz-eet2-core';
+import type { CertificateState, CertificateStore, StoredCertificate } from 'eet2-core';
 
 const ENCRYPTED_KEY_MARKER = '-----BEGIN ENCRYPTED PRIVATE KEY-----';
 

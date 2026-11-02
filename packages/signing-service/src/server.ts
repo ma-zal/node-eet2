@@ -1,7 +1,7 @@
 import path from 'node:path';
-import { CaEetClient, CertificateManager, EetClient, type EetEnvironment } from 'cz-eet2-core';
+import { CaEetClient, CertificateManager, EetClient, type EetEnvironment } from 'eet2-core';
 import { buildApp } from './app.js';
-import { loadConfig, resolveCaApiUrl, type ServerConfig } from './config.js';
+import { loadConfig, resolveCaApiUrl, type ServiceConfig } from './config.js';
 import { FileCertificateStore } from './file-certificate-store.js';
 import { log } from './logger.js';
 import { readVersions } from './versions.js';
@@ -13,7 +13,7 @@ const host = process.env.HOST ?? '0.0.0.0';
 const storageDir = path.resolve(process.env.EET2_STORAGE_DIR ?? '.storage');
 const passphrase = process.env.EET2_KEY_PASSPHRASE || undefined;
 
-let config: ServerConfig;
+let config: ServiceConfig;
 try {
   config = loadConfig(storageDir);
 } catch (error) {

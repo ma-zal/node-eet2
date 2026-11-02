@@ -1,5 +1,5 @@
 import type { FastifyPluginAsyncTypebox } from '@fastify/type-provider-typebox';
-import { EetCertificateError } from 'cz-eet2-core';
+import { EetCertificateError } from 'eet2-core';
 import type { AppContext } from '../app.js';
 import { log } from '../logger.js';
 import { apiError, CertificateUploadSchema } from '../schemas.js';

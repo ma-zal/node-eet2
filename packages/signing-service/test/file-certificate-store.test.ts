@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import type { CertificateState } from 'cz-eet2-core';
+import type { CertificateState } from 'eet2-core';
 import { FileCertificateStore } from '../src/file-certificate-store.js';
 import { createTestIdentity } from '../../core/test/unit/helpers.js';
 

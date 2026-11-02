@@ -1,6 +1,6 @@
 # Architektonická rozhodnutí
 
-Záznam klíčových rozhodnutí pro `eet2-core` a `eet2-server`. Konvence projektu jsou v [AGENTS.md](../AGENTS.md).
+Záznam klíčových rozhodnutí pro `eet2-core` a `eet2-signing-service`. Konvence projektu jsou v [AGENTS.md](../AGENTS.md).
 
 Fakta z oficiální dokumentace, ze kterých rozhodnutí vychází (zdroje viz AGENTS.md):
 
@@ -36,7 +36,7 @@ Tržba musí vzniknout atomicky s účtenkou. Kdyby frontu držel eet2, vznikl b
 - eet2 generuje pro každé volání nové `uuid_zpravy` a `dat_odesl` a vrací je ve výsledku k zalogování.
 - Ztráta úložiště eet2 neznamená ztrátu tržeb, jen nutnost znovu nahrát certifikát.
 
-## ADR-002: Struktura repozitáře – npm workspaces s core a serverem
+## ADR-002: Struktura repozitáře – npm workspaces s core a signing-service
 
 ### Rozhodnutí
 
@@ -46,9 +46,9 @@ Jeden repozitář s npm workspaces:
 node-eet2/
 ├── package.json              # private root, workspaces, skripty build/test/typecheck
 ├── tsconfig.base.json        # ESM, NodeNext, strict
-├── Dockerfile                # image serveru; build context = root (potřebuje core i server)
+├── Dockerfile                # image služby; build context = root (potřebuje core i signing-service)
 ├── packages/
-│   ├── core/                 # eet2-core, npm balíček cz-eet2-core, ESM + typy
+│   ├── core/                 # eet2-core, npm balíček, ESM + typy
 │   │   ├── src/
 │   │   │   ├── sale/         # model <Trzba>, validace a formátování dle XSD
 │   │   │   ├── soap/         # obálka, WS-Security podpis, parsování a ověření odpovědi
@@ -64,7 +64,7 @@ node-eet2/
 │   │       ├── unit/         # offline testy (npm test)
 │   │       ├── playground/   # integrační testy proti playground (npm run test:playground)
 │   │       └── fixtures/     # skutečné odpovědi playground, veřejný testovací certifikát
-│   └── server/               # eet2-server, private, publikuje se jen jako Docker image
+│   └── signing-service/      # eet2-signing-service, private, publikuje se jen jako Docker image
 │       ├── src/
 │       │   ├── server.ts     # vstupní bod: konfigurace, úložiště, CertificateManager, HTTP server
 │       │   ├── app.ts        # Fastify aplikace (v testech přes inject)
@@ -82,8 +82,8 @@ node-eet2/
 └── README.md
 ```
 
-- Server závisí na core přes workspace. V jednom commitu jsou tak vždy kompatibilní a Docker build nepotřebuje publikovaný core.
-- Typová kontrola, testy a dev režim serveru (`npm run dev`) pracují přímo se zdrojáky core (`paths` v `tsconfig.json`, alias ve `vitest.config.ts`), takže core není nutné předem buildit. Build serveru a Docker image používají sestavený core.
+- signing-service závisí na core přes workspace. V jednom commitu jsou tak vždy kompatibilní a Docker build nepotřebuje publikovaný core.
+- Typová kontrola, testy a dev režim služby (`npm run dev`) pracují přímo se zdrojáky core (`paths` v `tsconfig.json`, alias ve `vitest.config.ts`), takže core není nutné předem buildit. Build serveru a Docker image používají sestavený core.
 - Core je ESM-only.
 - Technické přílohy pro vývojáře (XSD, WSDL, `caeetapi_jwt.yml`) a veřejné certifikáty CA EET jsou součástí core.
 - PDF dokumenty z eet.gov.cz v repozitáři nejsou. Část je označená TLP:AMBER, odkazujeme na oficiální zdroj.
@@ -92,26 +92,26 @@ node-eet2/
 
 ### Kontext
 
-Core je knihovna na npm, server je Docker image, který core obsahuje. Změna v core musí vždy vyrobit nové image. Změna jen v serveru nesmí vydat nový, ale identický core.
+Core je knihovna na npm, signing-service je Docker image, který core obsahuje. Změna v core musí vždy vyrobit nové image. Změna jen ve službě nesmí vydat nový, ale identický core.
 
 ### Rozhodnutí
 
-- Oba balíčky mají vlastní semver: `eet2-core` (veřejný, na npm jako `cz-eet2-core`) a `eet2-server` (`private: true`, jen Docker image).
-- Tagy ve formátu Changesets: `cz-eet2-core@X.Y.Z`, `eet2-server@X.Y.Z`.
+- Oba balíčky mají vlastní semver: `eet2-core` (veřejný, npm) a `eet2-signing-service` (`private: true`, jen Docker image).
+- Tagy ve formátu Changesets: `eet2-core@X.Y.Z`, `eet2-signing-service@X.Y.Z`.
 - `.changeset/config.json`:
-  - `privatePackages: { version: true, tag: true }`: server se verzuje a taguje, i když se nepublikuje na npm.
-- Server závisí na core **přesnou verzí** (`"cz-eet2-core": "1.0.0"`, ne `^1.0.0`). Každé vydání core je tak mimo rozsah serveru a Changesets serveru samy zvednou patch verzi a závislost. Volba `updateInternalDependencies` to v Changesets 3 nezajistí, ta upravuje jen balíčky ze stejného vydání. Experimentální `updateInternalDependents: "always"` má v názvu varování, že se může změnit i v patch verzi. Přesná verze navíc odpovídá skutečnosti, protože image obsahuje právě tuto verzi core.
+  - `privatePackages: { version: true, tag: true }`: služba se verzuje a taguje, i když se nepublikuje na npm.
+- signing-service závisí na core **přesnou verzí** (`"eet2-core": "1.0.0"`, ne `^1.0.0`). Každé vydání core je tak mimo rozsah služby a Changesets jí samy zvednou patch verzi a závislost. Volba `updateInternalDependencies` to v Changesets 3 nezajistí, ta upravuje jen balíčky ze stejného vydání. Experimentální `updateInternalDependents: "always"` má v názvu varování, že se může změnit i v patch verzi. Přesná verze navíc odpovídá skutečnosti, protože image obsahuje právě tuto verzi core.
 - Výsledek:
-  - změna jen v serveru = release jen serveru,
-  - změna v core = release core a automaticky i serveru.
+  - změna jen ve službě = release jen služby,
+  - změna v core = release core a automaticky i služby.
 - Průběh:
   1. Ke každé změně s dopadem na uživatele se přidá changeset (`npx changeset`).
   2. `changesets/action` na `master` otevře nebo aktualizuje PR „Version Packages“ (verze, `CHANGELOG.md` pro každý balíček).
-  3. Merge tohoto PR spustí `changeset publish`: publikuje `cz-eet2-core` na npm a vytvoří tagy.
-  4. Docker build běží ve stejném `release.yml` podle výstupu `publishedPackages` (pokud obsahuje `eet2-server`). Tagy vytvořené přes `GITHUB_TOKEN` by samostatný workflow na tag nespustily.
-- Image `ghcr.io/ma-zal/eet2-server` (explicitně, ne výchozí název podle repozitáře). Tagy `X.Y.Z`, `X.Y`, `X`, `latest`. Multi-arch `linux/amd64` + `linux/arm64` (Raspberry Pi).
+  3. Merge tohoto PR spustí `changeset publish`: publikuje `eet2-core` na npm a vytvoří tagy.
+  4. Docker build běží ve stejném `release.yml` podle výstupu `publishedPackages` (pokud obsahuje `eet2-signing-service`). Tagy vytvořené přes `GITHUB_TOKEN` by samostatný workflow na tag nespustily.
+- Image `ghcr.io/ma-zal/eet2-signing-service` (explicitně, ne výchozí název podle repozitáře). Tagy `X.Y.Z`, `X.Y`, `X`, `latest`. Multi-arch `linux/amd64` + `linux/arm64` (Raspberry Pi).
 - Zveřejňuje se jen ověřený build:
-  - Do prvního vydání se nepublikuje nic, ani npm balíček, ani image. Implementace se ověřuje end-to-end se zebra-pos proti playground EET nad lokálním buildem. zebra-pos ho sestavuje přes `build` v compose pod finálním názvem `ghcr.io/ma-zal/eet2-server:1`.
+  - Do prvního vydání se nepublikuje nic, ani npm balíček, ani image. Implementace se ověřuje end-to-end se zebra-pos proti playground EET nad lokálním buildem. zebra-pos ho sestavuje přes `build` v compose pod finálním názvem `ghcr.io/ma-zal/eet2-signing-service:1`.
   - První vydání je `1.0.0`. Verze `0.x` se nezveřejňují. Připravuje ho changeset `.changeset/first-release.md` (major pro oba balíčky).
   - Žádný `edge` image z `master`. Neověřené změny se zkoušejí lokálním buildem, ne publikovaným image.
   - `release.yml` vznikne až před prvním vydáním. `ci.yml` nic nepublikuje, a může proto vzniknout kdykoli.
@@ -120,8 +120,8 @@ Core je knihovna na npm, server je Docker image, který core obsahuje. Změna v 
 
 ### Důsledky
 
-- Nekompatibilní změna HTTP API znamená major verzi serveru a novou cestu `/api/v2`. `/api/v1` po přechodnou dobu zůstává. Uživatelé pinují major (`eet2-server:1`).
-- Dohledatelnost: OCI labely image (`org.opencontainers.image.version`, `org.opencontainers.image.revision`) a `GET /api/v1/status` vrací `server_version`, `core_version`, `git_sha`.
+- Nekompatibilní změna HTTP API znamená major verzi služby a novou cestu `/api/v2`. `/api/v1` po přechodnou dobu zůstává. Uživatelé pinují major (`eet2-signing-service:1`).
+- Dohledatelnost: OCI labely image (`org.opencontainers.image.version`, `org.opencontainers.image.revision`) a `GET /api/v1/status` vrací `service_version`, `core_version`, `git_sha`.
 
 ## ADR-004: Jazyk a pojmenování
 
@@ -130,11 +130,11 @@ Core je knihovna na npm, server je Docker image, který core obsahuje. Změna v 
 - **Jazyk dokumentace a komentářů odpovídá jazyku oficiální dokumentace EET, tedy češtině.** Platí pro README, AGENTS.md, ADR i komentáře v kódu. Finanční správa vydává dokumentaci primárně česky; popis položek, postupy CA EET, `caeetapi_jwt.yml`, příručka i zákon existují jen česky, anglické překlady má jen část technických dokumentů.
 - Chybové a jiné zprávy pro uživatele jsou česky.
 - Identifikátory v kódu jsou anglicky, **kromě oficiálních názvů z rozhraní EET (XSD/WSDL) a CA EET API**. Ty se přebírají doslova.
-- HTTP JSON i datové typy core jsou jednotně v `snake_case` (oficiální názvy jsou `snake_case`). Server tak výsledky z core jen serializuje.
+- HTTP JSON i datové typy core jsou jednotně v `snake_case` (oficiální názvy jsou `snake_case`). Služba tak výsledky z core jen serializuje.
 - Třídy, funkce a options v TypeScriptu podle konvencí TS (`EetClient.sendSale()`, `SaleData`, `SendResult`, `CaEetClient`, `CertificateManager`, `CertificateStore`).
-- `config.cjs` serveru v `camelCase`.
+- `config.cjs` služby v `camelCase`.
 - Oficiální anglický název EET je „Electronic Registration of Sales“, proto `sale` / `sales` pro tržbu.
-- Knihovna se jmenuje `eet2-core`, na npm `cz-eet2-core`. Jmenný prostor npm je globální a EET existuje jen v ČR, předpona `cz-` to v názvu říká. Název z npm je v `package.json`, a proto i v importech, v závislosti serveru a v tagech vydání.
+- Názvy balíčků: knihovna `eet2-core` (npm), služba `eet2-signing-service` (Docker image `ghcr.io/ma-zal/eet2-signing-service`). Předpona `eet2-` je jen tam, kde je jmenný prostor sdílený (npm, image, tagy vydání). Uvnitř repozitáře stačí `core` a `signing-service` (adresáře `packages/core`, `packages/signing-service`) a třídy a typy předponu nemají, pokud ji kontext nepotřebuje. Předpona `cz-` není potřeba, „eet2“ je dost jednoznačné a ČR je v popisu a klíčových slovech balíčku.
 
 | Oblast | Oficiální názvy (beze změny) | Naše názvy (anglicky) |
 |---|---|---|
@@ -144,7 +144,7 @@ Core je knihovna na npm, server je Docker image, který core obsahuje. Změna v 
 | `PUT /api/v1/certificate` | `pkcs12`, `password` (shodné s CA API `Pkcs12DTO`) | – |
 | Core – typy CA EET API | názvy z `caeetapi_jwt.yml` doslova včetně `camelCase`: `reqId`, `state`, `pollAfterSeconds`, `rejectedReason`, `sn`, `validFrom`, `validTo` | `CaEetClient`, `CaEetApi`, `CaRequestStatus`, `CaPkcs12` |
 
-## ADR-005: HTTP API eet2-server v1
+## ADR-005: HTTP API eet2-signing-service v1
 
 ### Endpointy
 
@@ -240,7 +240,7 @@ Tělo `{ "error": { "type": "…", "message": "…" } }`, zpráva je česky:
 ```jsonc
 {
   "environment": "playground",          // playground | production podle nahraného certifikátu; bez certifikátu null
-  "server_version": "1.0.0", "core_version": "1.0.0", "git_sha": "…",
+  "service_version": "1.0.0", "core_version": "1.0.0", "git_sha": "…",
   "key_encrypted": false,               // ukládá se privátní klíč šifrovaně (EET2_KEY_PASSPHRASE)
   "certificate": {                      // chybí, pokud není nahrán
     "eic": "CZ00000019", "serial_number": "…",
@@ -293,7 +293,7 @@ Tělo `{ "error": { "type": "…", "message": "…" } }`, zpráva je česky:
 
 ### Rozhodnutí
 
-- Certifikát je v úložišti eet2-serveru `.storage/` (Docker volume), ne v databázi pokladního systému. Privátní klíč neopouští kontejner eet2.
+- Certifikát je v úložišti eet2-signing-serviceu `.storage/` (Docker volume), ne v databázi pokladního systému. Privátní klíč neopouští kontejner eet2.
 - **Prostředí EET** (playground / produkce) určuje aktuální certifikát podle CA EET, která ho vydala. Neukládá se zvlášť a není v konfiguraci, po startu se odvodí z uloženého certifikátu. Podle něj se volí endpoint EET a CA EET API pro obnovu. Bez certifikátu prostředí není.
 - **Nahrání** (`PUT /api/v1/certificate`, tělo `{ "pkcs12": "<base64>", "password": "…", "environment": "production" }`):
   1. Načtení `.p12` včetně legacy 3DES (pure-JS parser, např. node-forge, bez závislosti na OpenSSL legacy provideru).
@@ -303,7 +303,7 @@ Tělo `{ "error": { "type": "…", "message": "…" } }`, zpráva je česky:
 - **Proč explicitní `environment`, když ho určuje certifikát:** záměna souboru (testovací certifikát místo produkčního nebo naopak) by jinak tiše přepnula prostředí. Omylem nasazený playground přitom vypadá funkčně, jen se tržby neevidují. Správce volbou potvrzuje, že ví, do kterého prostředí certifikát nahrává.
 - Tržby nesou prostředí, do kterého patří (ADR-005), a eet2 je při nesouladu s certifikátem neodešle. Neodeslané tržby předchozího prostředí po přepnutí vyřadí volající, eet2 frontu nemá (ADR-001).
 - Heslo k `.p12` se neukládá. Po načtení se klíč a certifikát uloží v PEM.
-- Správu certifikátu včetně obnovy dělá `CertificateManager` z core. Stav ukládá jako jeden dokument `CertificateState` přes rozhraní `CertificateStore`; server ho ukládá do souboru `.storage/certificate.json`, embedder si může dodat vlastní úložiště. Obsah:
+- Správu certifikátu včetně obnovy dělá `CertificateManager` z core. Stav ukládá jako jeden dokument `CertificateState` přes rozhraní `CertificateStore`; signing-service ho ukládá do souboru `.storage/certificate.json`, embedder si může dodat vlastní úložiště. Obsah:
   - `version`,
   - `current` a `previous`, každý s poli `cert_pem`, `key_pem`, `chain_pem[]`, `eic`, `serial_number`, `valid_from`, `valid_to`, `installed_at`, `source` (`upload` / `renewal`),
   - `renewal` – rozběhnutá žádost o obnovu (ADR-008),
@@ -344,7 +344,7 @@ Jen pro věci svázané s procesem a kontejnerem:
 
 ### Rozhodnutí
 
-- Obnovu řídí `CertificateManager` (core). Server ho spustí s periodickou kontrolou každou hodinu; obnova začne při první kontrole po `valid_to − renewBeforeDays` (výchozí 21 dní). Pokud je termín po startu už v minulosti, začne hned.
+- Obnovu řídí `CertificateManager` (core). Služba ho spustí s periodickou kontrolou každou hodinu; obnova začne při první kontrole po `valid_to − renewBeforeDays` (výchozí 21 dní). Pokud je termín po startu už v minulosti, začne hned.
 - Autentizace k CA EET API: pro každé volání nový JWT.
   - Header: `alg: RS256`, `typ: JWT`, `x5t#S256` = base64url(SHA-256(DER certifikátu)).
   - Payload: `iat` (o 30 s do minulosti kvůli případně předbíhajícím hodinám) a `exp` = `iat` + 240 s (CA vyžaduje nejvýše 5 minut).
@@ -381,7 +381,7 @@ Jen pro věci svázané s procesem a kontejnerem:
 
 ### Rozhodnutí
 
-- eet2-server nemá vlastní autentizaci. Běží v Dockeru bez publikovaného portu a volá ho jen pokladní systém ve stejné interní síti (vzor teya ADR-006).
+- eet2-signing-service nemá vlastní autentizaci. Běží v Dockeru bez publikovaného portu a volá ho jen pokladní systém ve stejné interní síti (vzor teya ADR-006).
 - Jedna instance = jeden pokladní certifikát (jedno EIČ). Více poplatníků = více instancí s vlastním `.storage`.
 - Nahrání certifikátu z UI pokladního systému jde přes jeho autentizovaný backend, který volá JSON API eet2. Proxovaná HTML stránka by nefungovala (podepisující proxy pokladního systému neumožní POST z formuláře; stejný problém jako teya ADR-009).
 
@@ -393,7 +393,7 @@ Jen pro věci svázané s procesem a kontejnerem:
 ## ADR-010: Technologie
 
 - Node.js ≥ 22, TypeScript, ESM, `NodeNext`.
-- Server: Fastify + TypeBox (schémata = validace + typy), stejně jako teya ADR-008.
+- signing-service: Fastify + TypeBox (schémata = validace + typy), stejně jako teya ADR-008.
 - XML podpis a parsování: `xml-crypto` + `@xmldom/xmldom` (ověřeno v PoC).
 - `.p12`: node-forge (pure JS, podporuje legacy 3DES; ověřeno na oficiálních testovacích certifikátech z playground).
 - HTTP klient: vestavěný `fetch` s `AbortSignal.timeout()`.

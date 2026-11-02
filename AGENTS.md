@@ -2,7 +2,7 @@
 
 ## Účel projektu
 
-Open-source implementace EET 2.0 (elektronická evidence tržeb v ČR, ostrý provoz od 1. 1. 2027) pro Node.js. Repozitář obsahuje knihovnu `eet2-core` (v npm jako `cz-eet2-core`) a HTTP službu `eet2-server`. Primárním uživatelem je pokladní systém zebra-pos, řešení je ale obecné.
+Open-source implementace EET 2.0 (elektronická evidence tržeb v ČR, ostrý provoz od 1. 1. 2027) pro Node.js. Repozitář obsahuje knihovnu `eet2-core` a HTTP službu `eet2-signing-service`. Primárním uživatelem je pokladní systém zebra-pos, řešení je ale obecné.
 
 Architektonická rozhodnutí jsou v [docs/architecture-decisions.md](docs/architecture-decisions.md). Nové zásadní rozhodnutí = nové ADR v tomto souboru.
 
@@ -19,11 +19,11 @@ Architektonická rozhodnutí jsou v [docs/architecture-decisions.md](docs/archit
 ```
 node-eet2/
 ├── packages/
-│   ├── core/      # eet2-core, npm balíček cz-eet2-core
-│   └── server/    # eet2-server, publikuje se jen jako Docker image
-├── docs/          # ADR
-├── .changeset/    # Changesets: config.json a čekající záznamy změn
-└── .github/       # CI (ci.yml); release.yml vznikne až před prvním vydáním
+│   ├── core/             # eet2-core, npm balíček
+│   └── signing-service/  # eet2-signing-service, publikuje se jen jako Docker image
+├── docs/                 # ADR
+├── .changeset/           # Changesets: config.json a čekající záznamy změn
+└── .github/              # CI (ci.yml); release.yml vznikne až před prvním vydáním
 ```
 
 Podrobně viz ADR-002.
@@ -32,7 +32,7 @@ Podrobně viz ADR-002.
 
 - Node.js ≥ 22, TypeScript, ESM (`"type": "module"`, `NodeNext`)
 - npm workspaces
-- Server: Fastify + TypeBox, testy: Vitest
+- signing-service: Fastify + TypeBox, testy: Vitest
 - XML podpis: `xml-crypto` + `@xmldom/xmldom` (ověřeno v PoC)
 - Verzování: Changesets (ADR-003)
 
@@ -43,22 +43,22 @@ Spouštět z kořene repozitáře:
 | Skript | Popis |
 |---|---|
 | `npm install` | instalace všech workspaces |
-| `npm run dev` | eet2-server ve watch režimu nad zdrojáky (bez buildu); úložiště `.storage/` v kořeni repa |
-| `npm start` | eet2-server ze sestaveného `dist/` |
+| `npm run dev` | eet2-signing-service ve watch režimu nad zdrojáky (bez buildu); úložiště `.storage/` v kořeni repa |
+| `npm start` | eet2-signing-service ze sestaveného `dist/` |
 | `npm run build` | build všech workspaces |
 | `npm run typecheck` | typová kontrola |
 | `npm test` | unit testy (offline) |
 | `npm run test:playground` | stáhne oficiální testovací certifikáty do `.fixtures/playground/` a spustí integrační testy proti playground EET (síť; čtvrtek 20:00–6:00 bývá servisní okno) |
 | `npx changeset` | záznam změny pro příští vydání (interaktivní; v neinteraktivním prostředí napsat soubor do `.changeset/` ručně) |
 | `npx changeset status` | co by se vydalo a v jakých verzích |
-| `docker build -t eet2-server:local .` | lokální Docker image serveru |
+| `docker build -t eet2-signing-service:local .` | lokální Docker image služby |
 
-Lokální vyzkoušení serveru proti playground je popsané v [README.md](README.md).
+Lokální vyzkoušení služby proti playground je popsané v [README.md](README.md).
 
 ## Pravidla
 
 - Každá změna s dopadem na uživatele balíčku nebo image potřebuje changeset (`npx changeset`). CI to u pull requestů kontroluje.
-- `eet2-server` závisí na `eet2-core` přesnou verzí, ne rozsahem. Díky tomu vydání core vydá i server (ADR-003).
+- `eet2-signing-service` závisí na `eet2-core` přesnou verzí, ne rozsahem. Díky tomu vydání core vydá i službu (ADR-003).
 - Nic nepublikovat (npm, GHCR), dokud není implementace ověřená end-to-end se zebra-pos. Do té doby jen lokální build (ADR-003).
 - Nikdy necommitovat: privátní klíče, `.p12`, hesla, `.storage/`, `.fixtures/`.
 - Nikdy necommitovat PDF dokumenty z eet.gov.cz (část je označená TLP:AMBER). V dokumentaci jen odkaz na oficiální zdroj.

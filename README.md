@@ -8,19 +8,19 @@ Open-source klient pro **EET 2.0** (elektronická evidence tržeb v ČR, ostrý 
 
 | Balíček | Popis | Distribuce |
 |---|---|---|
-| `eet2-core` | Knihovna: sestavení, podpis a odeslání datové zprávy o tržbě, klasifikace výsledku, načtení pokladního certifikátu (`.p12`), klient CA EET pro automatickou obnovu certifikátu. | npm balíček `cz-eet2-core` |
-| `eet2-server` | HTTP služba nad `eet2-core`. Drží pokladní certifikát, sama ho před vypršením obnovuje a nabízí jednoduché JSON API pro odeslání tržby. | Docker image `ghcr.io/ma-zal/eet2-server` |
+| `eet2-core` | Knihovna: sestavení, podpis a odeslání datové zprávy o tržbě, klasifikace výsledku, načtení pokladního certifikátu (`.p12`), klient CA EET pro automatickou obnovu certifikátu. | npm |
+| `eet2-signing-service` | HTTP služba nad `eet2-core`. Drží pokladní certifikát, sama ho před vypršením obnovuje a nabízí jednoduché JSON API pro odeslání tržby. | Docker image `ghcr.io/ma-zal/eet2-signing-service` |
 
 eet2 tržbu podepíše, odešle a vrátí výsledek. **Frontu tržeb, opakování odeslání a hlídání 48hodinové lhůty řeší pokladní systém**, protože tržba musí vzniknout atomicky spolu s účtenkou (viz ADR-001).
 
-## eet2-server
+## eet2-signing-service
 
 ### Nasazení
 
 ```yaml
 services:
-  eet2-server:
-    image: ghcr.io/ma-zal/eet2-server:1   # zatím nevydáno – lokálně: docker build -t eet2-server:local .
+  eet2-signing-service:
+    image: ghcr.io/ma-zal/eet2-signing-service:1   # zatím nevydáno – lokálně: docker build -t eet2-signing-service:local .
     restart: unless-stopped
     volumes:
       - ./storage-eet2:/app/.storage   # konfigurace, certifikát s privátním klíčem, stav obnovy
@@ -87,8 +87,8 @@ curl localhost:3000/api/v1/status
 V Dockeru stejně, jen s připojeným úložištěm:
 
 ```bash
-docker build -t eet2-server:local .
-docker run --rm -p 3000:3000 -v "$PWD/.storage:/app/.storage" eet2-server:local
+docker build -t eet2-signing-service:local .
+docker run --rm -p 3000:3000 -v "$PWD/.storage:/app/.storage" eet2-signing-service:local
 ```
 
 Playground mívá servisní okno zpravidla ve čtvrtek 20:00–6:00. Potvrzovací kód z playground končí `-ff` a je jen testovací, tržbu nedokládá.

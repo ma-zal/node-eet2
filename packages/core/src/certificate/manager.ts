@@ -40,7 +40,7 @@ export interface CertificateState {
   next_renewal_attempt_at?: string;
 }
 
-/** Úložiště stavu certifikátu. Server ukládá do souboru, embedder si může dodat vlastní. */
+/** Úložiště stavu certifikátu. signing-service ukládá do souboru, embedder si může dodat vlastní. */
 export interface CertificateStore {
   load(): Promise<CertificateState | undefined>;
   save(state: CertificateState): Promise<void>;

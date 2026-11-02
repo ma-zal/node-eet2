@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { CaEetClient, CertificateManager, EetClient, MemoryCertificateStore, type EetEnvironment } from 'cz-eet2-core';
+import { CaEetClient, CertificateManager, EetClient, MemoryCertificateStore, type EetEnvironment } from 'eet2-core';
 import type { FastifyInstance } from 'fastify';
 import { buildApp } from '../src/app.js';
 import { createTestIdentity, readFixture, toLegacyPkcs12 } from '../../core/test/unit/helpers.js';
@@ -49,7 +49,7 @@ async function createApp(options: { ca?: boolean } = {}): Promise<FastifyInstanc
     manager,
     eetClients: { playground: createEetClient('playground'), production: createEetClient('production') },
     keyEncrypted: false,
-    versions: { server_version: '0.1.0', core_version: '0.1.0', git_sha: 'abc123' },
+    versions: { service_version: '0.1.0', core_version: '0.1.0', git_sha: 'abc123' },
     now: () => now,
   });
 }
@@ -77,7 +77,7 @@ describe('bez certifikátu', () => {
     const app = await createApp();
     expect((await app.inject('/api/v1/status')).json()).toEqual({
       environment: null,
-      server_version: '0.1.0',
+      service_version: '0.1.0',
       core_version: '0.1.0',
       git_sha: 'abc123',
       key_encrypted: false,

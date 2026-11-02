@@ -3,7 +3,7 @@ import { createRequire } from 'node:module';
 import path from 'node:path';
 import { Type, type Static } from '@sinclair/typebox';
 import { Value } from '@sinclair/typebox/value';
-import { CA_EET_API_URLS, MIN_TIMEOUT_MS, type EetEnvironment } from 'cz-eet2-core';
+import { CA_EET_API_URLS, MIN_TIMEOUT_MS, type EetEnvironment } from 'eet2-core';
 
 /** Tvar `.storage/config.cjs` (ADR-007). Prostředí EET tu není, určuje ho nahraný certifikát. */
 export const ConfigSchema = Type.Object(
@@ -16,11 +16,11 @@ export const ConfigSchema = Type.Object(
   { additionalProperties: false },
 );
 
-export type ServerConfig = Static<typeof ConfigSchema>;
+export type ServiceConfig = Static<typeof ConfigSchema>;
 
 export const CONFIG_FILE_NAME = 'config.cjs';
 
-const CONFIG_TEMPLATE = `// Konfigurace eet2-server. Po úpravě je nutný restart služby.
+const CONFIG_TEMPLATE = `// Konfigurace eet2-signing-service. Po úpravě je nutný restart služby.
 // Prostředí EET (playground / produkce) se tu nenastavuje, určuje ho nahraný pokladní certifikát.
 module.exports = {
   // Mezní doba odezvy EET v ms (minimum 2000).
@@ -47,7 +47,7 @@ const require = createRequire(import.meta.url);
  * - Chybějící adresář = pravděpodobně nepřipojený volume → chyba.
  * - Chybějící soubor se založí ze šablony s výchozími hodnotami.
  */
-export function loadConfig(storageDir: string): ServerConfig {
+export function loadConfig(storageDir: string): ServiceConfig {
   if (!existsSync(storageDir)) {
     throw new Error(`Adresář úložiště ${storageDir} neexistuje – pravděpodobně není připojený volume.`);
   }
@@ -71,7 +71,7 @@ export function loadConfig(storageDir: string): ServerConfig {
 }
 
 /** Adresa CA EET API pro automatickou obnovu v daném prostředí, nebo `undefined`, pokud se obnova neprovádí. */
-export function resolveCaApiUrl(config: ServerConfig, environment: EetEnvironment): string | undefined {
+export function resolveCaApiUrl(config: ServiceConfig, environment: EetEnvironment): string | undefined {
   if (config.caApiUrl === null) {
     return undefined;
   }

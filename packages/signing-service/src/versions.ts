@@ -3,20 +3,20 @@ import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 
 export interface Versions {
-  server_version: string;
+  service_version: string;
   core_version: string;
   /** Commit, ze kterého je image sestavený (build argument `GIT_SHA`). */
   git_sha?: string;
 }
 
-/** Verze serveru a core pro dohledatelnost (ADR-003). */
+/** Verze služby a core pro dohledatelnost (ADR-003). */
 export function readVersions(): Versions {
   // src/ i dist/ leží o úroveň níž než package.json.
-  const server = require('../package.json') as { version: string };
-  const core = require('cz-eet2-core/package.json') as { version: string };
+  const service = require('../package.json') as { version: string };
+  const core = require('eet2-core/package.json') as { version: string };
   const gitSha = process.env.GIT_SHA?.trim();
   return {
-    server_version: server.version,
+    service_version: service.version,
     core_version: core.version,
     ...(gitSha ? { git_sha: gitSha } : {}),
   };
