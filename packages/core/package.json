@@ -9,7 +9,13 @@
     "url": "git+https://github.com/ma-zal/node-eet2.git",
     "directory": "packages/core"
   },
-  "keywords": ["eet", "eet2", "evidence tržeb", "fiscalization", "czech"],
+  "keywords": [
+    "eet",
+    "eet2",
+    "evidence tržeb",
+    "fiscalization",
+    "czech"
+  ],
   "type": "module",
   "exports": {
     ".": {
