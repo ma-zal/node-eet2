@@ -2,7 +2,7 @@
 
 Knihovna pro **EET 2.0** (elektronická evidence tržeb v ČR): sestavení, podpis a odeslání datové zprávy o tržbě, klasifikace výsledku a načtení pokladního certifikátu.
 
-> **Stav: ve vývoji (0.x).** Automatická obnova certifikátu přes CA EET je implementovaná, ale zatím neověřená proti skutečné CA EET.
+> **Stav: předprodukční verze 0.x.** Vše je funkční. Nulová verze je jen rezerva pro případ, že by se při testovacím provozu ukázala potřeba nekompatibilní změny. Automatická obnova certifikátu přes CA EET je zatím neověřená proti skutečné CA EET.
 
 ## Použití
 

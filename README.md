@@ -2,7 +2,7 @@
 
 Open-source klient pro **EET 2.0** (elektronická evidence tržeb v ČR, ostrý provoz od 1. 1. 2027) pro Node.js.
 
-> **Stav: ve vývoji.** Balíčky zatím nejsou vydané. Architektura a rozhraní jsou popsané v [docs/architecture-decisions.md](docs/architecture-decisions.md).
+> **Stav: předprodukční verze 0.x.** Balíčky jsou vydané a vše je funkční. Nulová verze je jen rezerva pro případ, že by se při testovacím provozu ukázala potřeba nekompatibilní změny.
 
 ## Co repozitář obsahuje
 
@@ -103,6 +103,11 @@ Dokumentace i komentáře v kódu jsou česky, stejně jako oficiální dokument
 - [eet.gov.cz – Dokumenty k EET 2.0](https://eet.gov.cz/cs/o-eet/dokumenty-k-eet-2-0) (technická specifikace, popis položek, CA EET, testovací certifikáty)
 
 Dokumenty Finanční správy nejsou součástí repozitáře, odkazujeme na jejich oficiální zdroj.
+
+## Architektura
+
+Architektura a rozhraní jsou popsané v [docs/architecture-decisions.md](docs/architecture-decisions.md).
+
 
 ## Licence
 
